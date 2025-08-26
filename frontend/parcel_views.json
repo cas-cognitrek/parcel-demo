@@ -1,0 +1,248 @@
+{
+  "012-345-671": {
+    "parcelId": "012-345-671",
+    "legalDesc": "LOT 1 DISTRICT LOT 123 PLAN EPP1001",
+    "civicAddress": "101 Sample St",
+    "municipality": "Sample City",
+    "title": {
+      "titleNumber": "CA123451",
+      "status": "ACTIVE",
+      "issueDate": "2023-06-15"
+    },
+    "owners": [
+      {
+        "ownerKey": "own|1",
+        "name": "Owner 1",
+        "type": "PERSON"
+      }
+    ],
+    "rrr": [
+      {
+        "rrrId": "RRR-991",
+        "category": "CHARGE",
+        "type": "MORTGAGE",
+        "status": "ACTIVE",
+        "effectiveFrom": "2024-03-01T00:00:00Z",
+        "effectiveTo": null,
+        "amount": 260000,
+        "currency": "CAD"
+      }
+    ],
+    "surveyPlans": [
+      "EPP1001"
+    ],
+    "assessment": {
+      "year": 2025,
+      "totalValue": 950000
+    },
+    "zoning": {
+      "code": "R1",
+      "bylaw": "Bylaw-2020-01"
+    }
+  },
+  "012-345-672": {
+    "parcelId": "012-345-672",
+    "legalDesc": "LOT 2 DISTRICT LOT 123 PLAN EPP1002",
+    "civicAddress": "102 Sample St",
+    "municipality": "Sample City",
+    "title": {
+      "titleNumber": "CA123452",
+      "status": "ACTIVE",
+      "issueDate": "2023-06-15"
+    },
+    "owners": [
+      {
+        "ownerKey": "own|2",
+        "name": "Owner 2",
+        "type": "PERSON"
+      }
+    ],
+    "rrr": [
+      {
+        "rrrId": "RRR-992",
+        "category": "CHARGE",
+        "type": "MORTGAGE",
+        "status": "ACTIVE",
+        "effectiveFrom": "2024-03-01T00:00:00Z",
+        "effectiveTo": null,
+        "amount": 270000,
+        "currency": "CAD"
+      }
+    ],
+    "surveyPlans": [
+      "EPP1002"
+    ],
+    "assessment": {
+      "year": 2025,
+      "totalValue": 1000000
+    },
+    "zoning": {
+      "code": "R1",
+      "bylaw": "Bylaw-2020-01"
+    }
+  },
+  "012-345-673": {
+    "parcelId": "012-345-673",
+    "legalDesc": "LOT 3 DISTRICT LOT 123 PLAN EPP1003",
+    "civicAddress": "103 Sample St",
+    "municipality": "Sample City",
+    "title": {
+      "titleNumber": "CA123453",
+      "status": "ACTIVE",
+      "issueDate": "2023-06-15"
+    },
+    "owners": [
+      {
+        "ownerKey": "own|3",
+        "name": "Owner 3",
+        "type": "PERSON"
+      }
+    ],
+    "rrr": [
+      {
+        "rrrId": "RRR-993",
+        "category": "CHARGE",
+        "type": "MORTGAGE",
+        "status": "ACTIVE",
+        "effectiveFrom": "2024-03-01T00:00:00Z",
+        "effectiveTo": null,
+        "amount": 280000,
+        "currency": "CAD"
+      }
+    ],
+    "surveyPlans": [
+      "EPP1003"
+    ],
+    "assessment": {
+      "year": 2025,
+      "totalValue": 1050000
+    },
+    "zoning": {
+      "code": "R1",
+      "bylaw": "Bylaw-2020-01"
+    }
+  },
+  "012-345-674": {
+    "parcelId": "012-345-674",
+    "legalDesc": "LOT 4 DISTRICT LOT 123 PLAN EPP1004",
+    "civicAddress": "104 Sample St",
+    "municipality": "Sample City",
+    "title": {
+      "titleNumber": "CA123454",
+      "status": "ACTIVE",
+      "issueDate": "2023-06-15"
+    },
+    "owners": [
+      {
+        "ownerKey": "own|4",
+        "name": "Owner 4",
+        "type": "PERSON"
+      }
+    ],
+    "rrr": [
+      {
+        "rrrId": "RRR-994",
+        "category": "CHARGE",
+        "type": "MORTGAGE",
+        "status": "ACTIVE",
+        "effectiveFrom": "2024-03-01T00:00:00Z",
+        "effectiveTo": null,
+        "amount": 290000,
+        "currency": "CAD"
+      }
+    ],
+    "surveyPlans": [
+      "EPP1004"
+    ],
+    "assessment": {
+      "year": 2025,
+      "totalValue": 1100000
+    },
+    "zoning": {
+      "code": "R1",
+      "bylaw": "Bylaw-2020-01"
+    }
+  },
+  "012-345-675": {
+    "parcelId": "012-345-675",
+    "legalDesc": "LOT 5 DISTRICT LOT 123 PLAN EPP1005",
+    "civicAddress": "105 Sample St",
+    "municipality": "Sample City",
+    "title": {
+      "titleNumber": "CA123455",
+      "status": "ACTIVE",
+      "issueDate": "2023-06-15"
+    },
+    "owners": [
+      {
+        "ownerKey": "own|5",
+        "name": "Owner 5",
+        "type": "PERSON"
+      }
+    ],
+    "rrr": [
+      {
+        "rrrId": "RRR-995",
+        "category": "CHARGE",
+        "type": "MORTGAGE",
+        "status": "ACTIVE",
+        "effectiveFrom": "2024-03-01T00:00:00Z",
+        "effectiveTo": null,
+        "amount": 300000,
+        "currency": "CAD"
+      }
+    ],
+    "surveyPlans": [
+      "EPP1005"
+    ],
+    "assessment": {
+      "year": 2025,
+      "totalValue": 1150000
+    },
+    "zoning": {
+      "code": "R1",
+      "bylaw": "Bylaw-2020-01"
+    }
+  },
+  "012-345-676": {
+    "parcelId": "012-345-676",
+    "legalDesc": "LOT 6 DISTRICT LOT 123 PLAN EPP1006",
+    "civicAddress": "106 Sample St",
+    "municipality": "Sample City",
+    "title": {
+      "titleNumber": "CA123456",
+      "status": "ACTIVE",
+      "issueDate": "2023-06-15"
+    },
+    "owners": [
+      {
+        "ownerKey": "own|6",
+        "name": "Owner 6",
+        "type": "PERSON"
+      }
+    ],
+    "rrr": [
+      {
+        "rrrId": "RRR-996",
+        "category": "CHARGE",
+        "type": "MORTGAGE",
+        "status": "ACTIVE",
+        "effectiveFrom": "2024-03-01T00:00:00Z",
+        "effectiveTo": null,
+        "amount": 310000,
+        "currency": "CAD"
+      }
+    ],
+    "surveyPlans": [
+      "EPP1006"
+    ],
+    "assessment": {
+      "year": 2025,
+      "totalValue": 1200000
+    },
+    "zoning": {
+      "code": "R1",
+      "bylaw": "Bylaw-2020-01"
+    }
+  }
+}

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Parcel 360° Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body { margin:0; font-family: system-ui, Arial, sans-serif; }
+    header { background:#0b5cab; color:#fff; padding:10px 16px; font-weight:600; }
+    #map { height: calc(100vh - 56px); }
+    .legend { padding:8px; background:#fff; border:1px solid #ccc; position:absolute; top:70px; right:10px; z-index:9999; width:280px; }
+    .legend code { background:#f6f8fa; padding:1px 4px; border-radius:3px; }
+    .popup-table td { padding:2px 6px; vertical-align:top; }
+  </style>
+</head>
+<body>
+  <header>Parcel 360° Demo — Synthetic Geo (Leaflet) + Optional API</header>
+  <div id="map"></div>
+  <div class="legend">
+    <strong>How it works</strong>
+    <ol>
+      <li>Click a parcel polygon.</li>
+      <li>If <code>API_BASE</code> is set in <code>config.js</code>, it fetches from the API.</li>
+      <li>Else, it uses local <code>parcel_views.json</code> (synthetic).</li>
+    </ol>
+    <div><b>Status:</b> <span id="status">Detecting...</span></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="./config.js"></script>
+  <script>
+    const statusEl = document.getElementById('status');
+    const API_BASE = (window.API_BASE || '').trim();
+
+    const map = L.map('map').setView([49.280, -123.120], 17);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+    function style() {
+      return { color: '#3b5bdb', weight: 1, fillColor: '#a5d8ff', fillOpacity: 0.5 };
+    }
+
+    // Load polygons
+    fetch('./synthetic_parcels.geojson')
+      .then(r => r.json())
+      .then(geo => {
+        const lyr = L.geoJSON(geo, {
+          style: style,
+          onEachFeature: (feature, layer) => {
+            layer.on('click', () => onParcelClick(feature, layer));
+          }
+        }).addTo(map);
+        map.fitBounds(lyr.getBounds(), { padding: [20,20] });
+      });
+
+    async function fetchParcelView(parcelId) {
+      if (API_BASE) {
+        statusEl.textContent = 'API mode';
+        try {
+          const r = await fetch(API_BASE.replace(/\/$/, '') + '/api/v1/parcels/' + parcelId);
+          if (!r.ok) throw new Error('API ' + r.status);
+          return await r.json();
+        } catch (e) {
+          console.warn('API fetch failed, falling back to local JSON', e);
+          statusEl.textContent = 'API failed → local JSON';
+          const locals = await (await fetch('./parcel_views.json')).json();
+          return locals[parcelId] || {};
+        }
+      } else {
+        statusEl.textContent = 'Local JSON mode';
+        const locals = await (await fetch('./parcel_views.json')).json();
+        return locals[parcelId] || {};
+      }
+    }
+
+    function makePopupHtml(d, pid) {
+      const owners = (d.owners||[]).map(o => o.name).join(', ');
+      const rrrs = (d.rrr||[]).map(r => (r.type||'') + (r.status? ' ('+r.status+')':'')).join(', ');
+      return `
+        <table class="popup-table">
+          <tr><td><b>Parcel</b></td><td>${pid}</td></tr>
+          <tr><td><b>Legal</b></td><td>${d.legalDesc||''}</td></tr>
+          <tr><td><b>Address</b></td><td>${d.civicAddress||''}</td></tr>
+          <tr><td><b>Title</b></td><td>${d.title?d.title.titleNumber:''} ${d.title? '('+d.title.status+')':''}</td></tr>
+          <tr><td><b>Owners</b></td><td>${owners}</td></tr>
+          <tr><td><b>RRR</b></td><td>${rrrs}</td></tr>
+          <tr><td><b>Plans</b></td><td>${(d.surveyPlans||[]).join(', ')}</td></tr>
+          <tr><td><b>Assessment</b></td><td>${d.assessment?d.assessment.totalValue:''}</td></tr>
+          <tr><td><b>Zoning</b></td><td>${d.zoning?d.zoning.code:''}</td></tr>
+        </table>`;
+    }
+
+    async function onParcelClick(feature, layer) {
+      const pid = feature.properties.parcelId;
+      const data = await fetchParcelView(pid);
+      layer.bindPopup(makePopupHtml(data, pid)).openPopup();
+    }
+  </script>
+</body>
+</html>
