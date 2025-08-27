@@ -38,39 +38,61 @@ def health():
 
 # Get parcel by ID
 @app.route("/api/v1/parcels/<parcel_id>")
+from flask import Flask, jsonify
+# ... your existing imports above
+
+def node_to_dict(n):
+    if n is None:
+        return None
+    return {
+        "id": getattr(n, "element_id", None),
+        "labels": list(getattr(n, "labels", [])),
+        "properties": dict(n),
+    }
+
+@app.route("/api/v1/parcels/<parcel_id>")
 def get_parcel(parcel_id):
     if not driver:
         return jsonify({"error": "Neo4j not configured"}), 503
 
-    with driver.session() as session:
-        result = session.run(
-            """
-            MATCH (p:Parcel {parcelId: $parcel_id})
-            OPTIONAL MATCH (p)-[:HAS_TITLE]->(t:Title)-[:OWNED_BY]->(o:Owner)
-            OPTIONAL MATCH (p)-[:HAS_RRR]->(r:RRR)
-            OPTIONAL MATCH (p)-[:HAS_PLAN]->(sp:SurveyPlan)
-            OPTIONAL MATCH (p)-[:HAS_ASSESSMENT]->(a:Assessment)
-            OPTIONAL MATCH (p)-[:HAS_ZONING]->(z:Zoning)
-            RETURN p, collect(DISTINCT t) AS titles, collect(DISTINCT o) AS owners,
-                   collect(DISTINCT r) AS rrrs, collect(DISTINCT sp) AS plans,
-                   collect(DISTINCT a) AS assessments, collect(DISTINCT z) AS zonings
-            """,
-            parcel_id=parcel_id
-        )
-        record = result.single()
+    try:
+        with driver.session() as session:
+            record = session.run(
+                """
+                MATCH (p:Parcel {parcelId: $parcel_id})
+                OPTIONAL MATCH (p)-[:HAS_TITLE]->(t:Title)-[:OWNED_BY]->(o:Owner)
+                OPTIONAL MATCH (p)-[:HAS_RRR]->(r:RRR)
+                OPTIONAL MATCH (p)-[:HAS_PLAN]->(sp:SurveyPlan)
+                OPTIONAL MATCH (p)-[:HAS_ASSESSMENT]->(a:Assessment)
+                OPTIONAL MATCH (p)-[:HAS_ZONING]->(z:Zoning)
+                RETURN p,
+                       collect(DISTINCT t) AS titles,
+                       collect(DISTINCT o) AS owners,
+                       collect(DISTINCT r) AS rrrs,
+                       collect(DISTINCT sp) AS plans,
+                       collect(DISTINCT a) AS assessments,
+                       collect(DISTINCT z) AS zonings
+                """,
+                parcel_id=parcel_id
+            ).single()
+
         if not record:
             return jsonify({"error": f"Parcel {parcel_id} not found"}), 404
 
-        parcel_data = {
-            "parcel": record["p"],
-            "titles": record["titles"],
-            "owners": record["owners"],
-            "rrrs": record["rrrs"],
-            "plans": record["plans"],
-            "assessments": record["assessments"],
-            "zonings": record["zonings"],
+        out = {
+            "parcel": node_to_dict(record["p"]),
+            "titles":   [node_to_dict(x) for x in record["titles"] if x],
+            "owners":   [node_to_dict(x) for x in record["owners"] if x],
+            "rrrs":     [node_to_dict(x) for x in record["rrrs"] if x],
+            "plans":    [node_to_dict(x) for x in record["plans"] if x],
+            "assessments": [node_to_dict(x) for x in record["assessments"] if x],
+            "zonings":  [node_to_dict(x) for x in record["zonings"] if x],
         }
-        return jsonify(parcel_data)
+        return jsonify(out)
+
+    except Exception as e:
+        app.logger.exception("Error fetching parcel %s", parcel_id)
+        return jsonify({"error": "Internal Server Error", "detail": str(e)}), 500
 
 # ---------------------
 # Local run
