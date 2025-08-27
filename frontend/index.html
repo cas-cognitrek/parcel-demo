@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Parcel Demo (BC, Canada)</title>
+  <title>Parcel Demo — BC, Canada</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- Leaflet CSS -->
@@ -12,19 +12,52 @@
     integrity="sha256-sA+e2tu2Tqj1bWgGvZ3Ww7x6O9KpUQ5pU9Gt6Z8Jf6Q="
     crossorigin=""
   />
+
   <style>
-    html, body { height: 100%; margin: 0; }
-    #map { height: 100%; width: 100%; }
-    /* Toolbar styling */
-    #toolbar {
-      position: absolute; z-index: 1000; top: 12px; left: 12px;
-      background: #fff; border: 1px solid #ddd; border-radius: 10px;
-      padding: 10px 12px; box-shadow: 0 2px 8px rgba(0,0,0,.08);
-      font-family: system-ui, Segoe UI, Roboto, Arial, sans-serif;
+    :root{
+      --panel-bg:#ffffff;
+      --panel-bd:#e6e6e6;
+      --shadow:0 6px 18px rgba(0,0,0,.08);
+      --text:#1b1f24;
+      --muted:#666;
+      --pill-bg:#eef3ff;
+      --pill-bd:#cfd8ff;
+      --brand:#1f78b4;
     }
-    #toolbar label { font-weight: 600; margin-right: 6px; }
-    #parcelSelect { min-width: 280px; padding: 6px; }
+
+    html, body { height: 100%; margin: 0; }
+    body { font-family: system-ui, Segoe UI, Roboto, Arial, sans-serif; color: var(--text); }
+
+    /* Map must have a height or it won't show */
+    #map { position: absolute; inset: 0; }
+
+    /* Floating toolbar */
+    #toolbar {
+      position: absolute; z-index: 1000; top: 14px; left: 14px;
+      background: var(--panel-bg); border: 1px solid var(--panel-bd);
+      border-radius: 12px; padding: 12px; box-shadow: var(--shadow);
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    }
+    #toolbar label { font-weight: 700; margin-right: 6px; }
+    #parcelSelect, #modeBadge {
+      padding: 8px 10px; border: 1px solid var(--panel-bd); border-radius: 10px;
+      min-width: 280px; background: #fff;
+    }
+    #modeBadge {
+      min-width: auto; background: var(--pill-bg); border-color: var(--pill-bd); font-size: 12px;
+    }
+
+    /* Popup spacing a bit tighter than Leaflet default */
     .leaflet-popup-content { margin: 10px 14px; }
+
+    /* Mini legend card (optional) */
+    #legend {
+      position: absolute; z-index: 1000; bottom: 14px; left: 14px;
+      background: var(--panel-bg); border: 1px solid var(--panel-bd);
+      border-radius: 12px; padding: 10px 12px; box-shadow: var(--shadow);
+      font-size: 13px; color: var(--muted);
+    }
+    .chip{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--pill-bg);border:1px solid var(--pill-bd);margin-right:6px;margin-bottom:4px;}
   </style>
 </head>
 <body>
@@ -35,12 +68,19 @@
     <select id="parcelSelect">
       <option value="">— choose —</option>
     </select>
+    <span id="modeBadge"></span>
+  </div>
+
+  <!-- Bottom-left legend (optional) -->
+  <div id="legend">
+    <div><b>Demo parcels (BC)</b></div>
+    <div style="margin-top:4px">Click a polygon or pick from the dropdown.</div>
   </div>
 
   <!-- Map -->
   <div id="map"></div>
 
-  <!-- Config (defines window.API_BASE) -->
+  <!-- Your config (defines window.API_BASE) -->
   <script src="config.js"></script>
 
   <!-- Leaflet JS -->
@@ -51,17 +91,17 @@
   ></script>
 
   <script>
-  // ------------------------------
-  // Inline GeoJSON for BC, Canada
-  // 9 non-touching 1km-ish squares (degrees are approximate)
-  // Area roughly around Metro Vancouver (lat ~49.24, lon ~-123.14)
-  // ------------------------------
-  (function buildParcels() {
-    // Grid parameters: 3x3 squares with gaps so they don't touch
-    const minLon = -123.20;
-    const minLat =  49.22;
-    const size   =  0.01;   // ~1.1 km in lat; lon varies by latitude (fine for demo)
-    const gap    =  0.002;  // ~200m gaps so polygons don't touch
+  // =========================================================
+  // 1) Inline GeoJSON: 9 non-touching squares in Metro Vancouver
+  // =========================================================
+  (function buildParcels(){
+    // Simple 3x3 grid with gaps so polygons do NOT touch.
+    // Coordinates around Vancouver (approx).
+    const minLon = -123.20;  // west
+    const minLat =  49.22;   // south
+    const size   =  0.010;   // ~1.1km squares
+    const gap    =  0.002;   // ~200m gaps
+
     const ids = [
       "012-345-101","012-345-102","012-345-103",
       "012-345-104","012-345-105","012-345-106",
@@ -69,81 +109,83 @@
     ];
 
     const features = [];
-    let k = 0;
-    for (let r = 0; r < 3; r++) {
-      for (let c = 0; c < 3; c++) {
-        const lon0 = minLon + c * (size + gap);
-        const lat0 = minLat + r * (size + gap);
+    let n = 0;
+    for (let r=0; r<3; r++){
+      for (let c=0; c<3; c++){
+        const lon0 = minLon + c*(size+gap);
+        const lat0 = minLat + r*(size+gap);
         const lon1 = lon0 + size;
         const lat1 = lat0 + size;
-        const coords = [
-          [lon0, lat0], [lon0, lat1], [lon1, lat1], [lon1, lat0], [lon0, lat0]
-        ];
+        const ring = [[lon0,lat0],[lon0,lat1],[lon1,lat1],[lon1,lat0],[lon0,lat0]];
         features.push({
-          type: "Feature",
-          properties: { parcelId: ids[k++] },
-          geometry: { type: "Polygon", coordinates: [coords] }
+          type:"Feature",
+          properties:{ parcelId: ids[n++] },
+          geometry:{ type:"Polygon", coordinates:[ ring ] }
         });
       }
     }
 
-    window.PARCELS_GEOJSON = {
-      type: "FeatureCollection",
-      features
-    };
+    window.PARCELS_GEOJSON = { type:"FeatureCollection", features };
   })();
 
-  // ------------------------------
-  // UI helpers for popups
-  // ------------------------------
-  function fmtMoney(n) {
-    return (n === null || n === undefined)
-      ? "—"
-      : Number(n).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  // =========================================================
+  // 2) Helpers for popup rendering
+  // =========================================================
+  const $mode = document.getElementById('modeBadge');
+  function setModeBadge(){
+    $mode.textContent = window.API_BASE ? "Mode: Live API" : "Mode: Local JSON";
   }
-  function safe(v, fallback="—") { return (v === null || v === undefined || v === "") ? fallback : v; }
-  function pill(text) {
-    return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#eef;border:1px solid #ccd;margin-right:6px;margin-bottom:4px;">${text}</span>`;
+  setModeBadge();
+
+  function money(n){
+    if(n===null || n===undefined || isNaN(n)) return "—";
+    return Number(n).toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:0});
   }
-  function renderOwners(owners=[]) {
-    if (!owners.length) return "—";
-    return owners.map(o => {
-      const name = safe(o?.properties?.name || o?.name, "Unknown");
-      const share = safe(o?.properties?.share || o?.share, "");
-      return `<li>${name}${share ? ` <small style="opacity:.7">(${share})</small>` : ""}</li>`;
+  function safe(v, d="—"){ return (v===null||v===undefined||v==="") ? d : v; }
+  function chip(txt){ return `<span class="chip">${txt}</span>`; }
+
+  function renderOwners(owners=[]){
+    if(!owners.length) return "—";
+    return owners.map(o=>{
+      const p = o.properties || o;
+      const nm = safe(p.name,"Unknown");
+      const sh = p.share ? ` <small style="opacity:.7">(${p.share})</small>` : "";
+      return `<li>${nm}${sh}</li>`;
     }).join("");
   }
-  function renderRRRs(rrrs=[]) {
-    if (!rrrs.length) return "—";
-    return rrrs.map(r => {
+  function renderRRR(rrrs=[]){
+    if(!rrrs.length) return "—";
+    return rrrs.map(r=>{
       const p = r.properties || r;
-      const bits = [safe(p.type, "RRR"), safe(p.status, ""), safe(p.holder||p.note||p.purpose||"", "")]
-        .filter(x => x && x !== "—");
-      return pill(bits.join(" • "));
+      const bits = [safe(p.type,"RRR"), p.status||"", p.holder||p.purpose||p.note||""].filter(Boolean);
+      return chip(bits.join(" • "));
     }).join("");
   }
-  function renderZoning(zonings=[]) {
-    if (!zonings.length) return "—";
-    return zonings.map(z => pill(safe((z.properties||z).zoneType,"Zoning"))).join("");
-  }
-  function renderPlans(plans=[]) {
-    if (!plans.length) return "—";
-    return plans.map(sp => {
+  function renderPlans(plans=[]){
+    if(!plans.length) return "—";
+    return plans.map(sp=>{
       const p = sp.properties || sp;
-      return pill(`${safe(p.planId,"Plan")} — ${safe(p.description,"")}`);
+      return chip(`${safe(p.planId,"Plan")} — ${safe(p.description,"")}`);
     }).join("");
   }
-  function renderAssessments(assessments=[]) {
-    if (!assessments.length) return "—";
-    return assessments.map(a => {
+  function renderAssess(ass=[]){
+    if(!ass.length) return "—";
+    return ass.map(a=>{
       const p = a.properties || a;
-      return pill(`${safe(p.year,"Year")} — ${fmtMoney(p.value)}`);
+      return chip(`${safe(p.year,"Year")} — ${money(p.value)}`);
+    }).join("");
+  }
+  function renderZoning(zs=[]){
+    if(!zs.length) return "—";
+    return zs.map(z=>{
+      const p = z.properties || z;
+      return chip(safe(p.zoneType,"Zoning"));
     }).join("");
   }
 
-  // Works with API payload OR offline parcel_views.json shape
-  function renderParcelView(view) {
-    const parcel   = view.parcel?.properties ? view.parcel.properties : (view.parcel || view);
+  function renderParcelView(view){
+    // normalize shapes (API vs local)
+    const parcel   = view.parcel?.properties ? view.parcel.properties : (view.parcel||view);
     const titles   = view.titles || (view.title ? [view.title] : []);
     const owners   = view.owners || [];
     const rrrs     = view.rrrs || [];
@@ -151,108 +193,78 @@
     const assess   = view.assessments || (view.assessment ? [view.assessment] : []);
     const zonings  = view.zonings || (view.zoning ? [view.zoning] : []);
 
-    const pid = safe(parcel?.parcelId, "Unknown");
-    const legal = safe(parcel?.legalDescription, "—");
+    const pid   = safe(parcel?.parcelId,"Unknown");
+    const legal = safe(parcel?.legalDescription,"—");
 
     const titleBadges = titles.length
-      ? titles.map(t => {
-          const p = t.properties || t;
-          return pill(`${safe(p.titleId,"Title")} — ${safe(p.status,"")}`);
+      ? titles.map(t=>{
+          const p=t.properties||t;
+          return chip(`${safe(p.titleId,"Title")} — ${safe(p.status,"")}`);
         }).join("")
       : "—";
 
     return `
-    <div style="font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;min-width:280px;max-width:380px">
-      <div style="margin-bottom:8px">
-        <div style="font-weight:700;font-size:16px;line-height:1.2">Parcel ${pid}</div>
-        <div style="color:#555;margin-top:2px">${legal}</div>
-      </div>
+      <div style="min-width:280px;max-width:380px">
+        <div style="font-weight:800;font-size:16px">Parcel ${pid}</div>
+        <div style="color:#555;margin:2px 0 8px">${legal}</div>
 
-      <div style="margin:10px 0">
-        <div style="font-weight:600;margin-bottom:4px">Title</div>
-        <div>${titleBadges}</div>
-      </div>
+        <div style="margin:8px 0">
+          <div style="font-weight:700;margin-bottom:4px">Title</div>
+          <div>${titleBadges}</div>
+        </div>
 
-      <div style="margin:10px 0">
-        <div style="font-weight:600;margin-bottom:4px">Owner(s)</div>
-        <ul style="margin:0;padding-left:18px">${renderOwners(owners)}</ul>
-      </div>
+        <div style="margin:8px 0">
+          <div style="font-weight:700;margin-bottom:4px">Owner(s)</div>
+          <ul style="margin:0;padding-left:18px">${renderOwners(owners)}</ul>
+        </div>
 
-      <div style="margin:10px 0">
-        <div style="font-weight:600;margin-bottom:4px">RRR</div>
-        <div>${renderRRRs(rrrs)}</div>
-      </div>
+        <div style="margin:8px 0">
+          <div style="font-weight:700;margin-bottom:4px">RRR</div>
+          <div>${renderRRR(rrrs)}</div>
+        </div>
 
-      <div style="margin:10px 0">
-        <div style="font-weight:600;margin-bottom:4px">Zoning</div>
-        <div>${renderZoning(zonings)}</div>
-      </div>
+        <div style="margin:8px 0">
+          <div style="font-weight:700;margin-bottom:4px">Zoning</div>
+          <div>${renderZoning(zonings)}</div>
+        </div>
 
-      <div style="margin:10px 0">
-        <div style="font-weight:600;margin-bottom:4px">Survey Plan</div>
-        <div>${renderPlans(plans)}</div>
-      </div>
+        <div style="margin:8px 0">
+          <div style="font-weight:700;margin-bottom:4px">Survey Plan</div>
+          <div>${renderPlans(plans)}</div>
+        </div>
 
-      <div style="margin:10px 0">
-        <div style="font-weight:600;margin-bottom:4px">Assessment</div>
-        <div>${renderAssessments(assess)}</div>
-      </div>
+        <div style="margin:8px 0">
+          <div style="font-weight:700;margin-bottom:4px">Assessment</div>
+          <div>${renderAssess(assess)}</div>
+        </div>
 
-      <div style="margin-top:12px;font-size:12px;opacity:.7">
-        Source: ${window.API_BASE ? "Live API" : "Local JSON"}
-      </div>
-    </div>`;
+        <div style="margin-top:10px;font-size:12px;opacity:.7">
+          Source: ${window.API_BASE ? "Live API" : "Local JSON"}
+        </div>
+      </div>`;
   }
 
-  // ------------------------------
-  // Map init (BC, Canada)
-  // ------------------------------
-  const map = L.map('map', {
-    center: [49.25, -123.12], // Vancouver-ish
-    zoom: 12
-  });
-
+  // =========================================================
+  // 3) Map + layer + dropdown
+  // =========================================================
+  const map = L.map('map', { center:[49.25,-123.12], zoom: 12 });
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map);
 
-  // ------------------------------
-  // Layer + dropdown wiring
-  // ------------------------------
   const byParcelId = new Map();
+  const $select = document.getElementById('parcelSelect');
   let geoLayer;
 
-  async function openParcelPopup(parcelId, layer) {
-    try {
-      let data;
-      if (window.API_BASE) {
-        const res = await fetch(`${window.API_BASE}/api/v1/parcels/${encodeURIComponent(parcelId)}`);
-        if (!res.ok) throw new Error(`API ${res.status}`);
-        data = await res.json();
-      } else {
-        const res = await fetch('parcel_views.json');
-        if (!res.ok) throw new Error(`local JSON ${res.status}`);
-        const views = await res.json();
-        data = views[parcelId];
-        if (!data) throw new Error(`parcel ${parcelId} not found in parcel_views.json`);
-      }
-      layer.bindPopup(renderParcelView(data), { maxWidth: 420 }).openPopup();
-    } catch (e) {
-      console.error(e);
-      layer.bindPopup(
-        `<b>Could not load parcel ${parcelId}</b><br/><small>${String(e.message||e)}</small>`
-      ).openPopup();
-    }
-  }
-
-  function addParcelsLayer() {
+  function addParcelsLayer(){
     geoLayer = L.geoJSON(window.PARCELS_GEOJSON, {
-      style: { color: "#1f78b4", weight: 2, fillOpacity: 0.15 },
+      style: { color: "#1f78b4", weight: 2, fillOpacity: .15 },
       onEachFeature: (feature, layer) => {
         const pid = feature?.properties?.parcelId;
         if (pid) byParcelId.set(pid, layer);
-        layer.on('click', () => openParcelPopup(pid, layer));
+
+        layer.on('click', () => openParcel(pid, layer));
       }
     }).addTo(map);
 
@@ -260,61 +272,80 @@
     if (b.isValid()) map.fitBounds(b.pad(0.2));
   }
 
-  async function populateDropdown() {
-    const select = document.getElementById('parcelSelect');
+  async function openParcel(parcelId, layer){
+    try{
+      let data;
+      if (window.API_BASE){
+        const res = await fetch(`${window.API_BASE}/api/v1/parcels/${encodeURIComponent(parcelId)}`);
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        data = await res.json();
+      } else {
+        const res = await fetch('parcel_views.json');
+        if (!res.ok) throw new Error(`parcel_views.json ${res.status}`);
+        const views = await res.json();
+        data = views[parcelId];
+        if (!data) throw new Error(`parcel ${parcelId} not found in parcel_views.json`);
+      }
 
-    if (window.API_BASE) {
-      // Populate from API
-      try {
+      layer.bindPopup(renderParcelView(data), { maxWidth: 420 }).openPopup();
+
+    }catch(err){
+      console.error(err);
+      layer.bindPopup(`<b>Could not load parcel ${parcelId}</b><br/><small>${String(err.message||err)}</small>`).openPopup();
+    }
+  }
+
+  async function populateDropdown(){
+    // If API available, use it (includes legalDescription with props=1)
+    if (window.API_BASE){
+      try{
         const res = await fetch(`${window.API_BASE}/api/v1/parcels?limit=500&props=1`);
         const data = await res.json();
-        for (const item of (data.items || [])) {
+        (data.items||[]).forEach(row=>{
           const opt = document.createElement('option');
-          opt.value = item.parcelId;
-          opt.textContent = item.legalDescription
-            ? `${item.parcelId} — ${item.legalDescription}`
-            : item.parcelId;
-          select.appendChild(opt);
-        }
-      } catch {
-        // Fallback to local
-        await populateFromLocalViews(select);
+          opt.value = row.parcelId;
+          opt.textContent = row.legalDescription ? `${row.parcelId} — ${row.legalDescription}` : row.parcelId;
+          $select.appendChild(opt);
+        });
+      }catch(e){
+        // Fall back to local JSON
+        await populateFromLocal();
       }
     } else {
-      await populateFromLocalViews(select);
+      await populateFromLocal();
     }
 
-    select.addEventListener('change', () => {
-      const pid = select.value;
+    $select.addEventListener('change', ()=>{
+      const pid = $select.value;
       if (!pid) return;
-      const layer = byParcelId.get(pid);
-      if (layer) {
-        const bounds = layer.getBounds?.();
-        if (bounds?.isValid()) map.fitBounds(bounds.pad(0.3));
-        openParcelPopup(pid, layer);
+      const lyr = byParcelId.get(pid);
+      if (lyr){
+        const b = lyr.getBounds?.();
+        if (b?.isValid()) map.fitBounds(b.pad(0.3));
+        openParcel(pid, lyr);
       } else {
-        alert(`Parcel ${pid} not found in the map layer (check parcel IDs).`);
+        alert(`Parcel ${pid} not found in the map layer.`);
       }
     });
   }
 
-  async function populateFromLocalViews(select) {
-    try {
+  async function populateFromLocal(){
+    try{
       const res = await fetch('parcel_views.json');
       const views = await res.json();
-      Object.keys(views).sort().forEach(pid => {
-        const desc = views[pid]?.legalDescription || '';
+      Object.keys(views).sort().forEach(pid=>{
         const opt = document.createElement('option');
+        const desc = views[pid]?.legalDescription || "";
         opt.value = pid;
         opt.textContent = desc ? `${pid} — ${desc}` : pid;
-        select.appendChild(opt);
+        $select.appendChild(opt);
       });
-    } catch (e) {
+    }catch(e){
       console.warn("Could not load parcel_views.json for dropdown:", e);
     }
   }
 
-  // Init
+  // Boot
   addParcelsLayer();
   populateDropdown();
   </script>
