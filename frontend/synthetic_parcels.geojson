@@ -1,1 +1,77 @@
-{"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-123.12, 49.28], [-123.119, 49.28], [-123.119, 49.281], [-123.12, 49.281], [-123.12, 49.28]]]}, "properties": {"parcelId": "012-345-671", "legalDesc": "LOT 1 DISTRICT LOT 123 PLAN EPP1001", "civicAddress": "101 Sample St", "municipality": "Sample City"}}, {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-123.11880000000001, 49.28], [-123.1178, 49.28], [-123.1178, 49.281], [-123.11880000000001, 49.281], [-123.11880000000001, 49.28]]]}, "properties": {"parcelId": "012-345-672", "legalDesc": "LOT 2 DISTRICT LOT 123 PLAN EPP1002", "civicAddress": "102 Sample St", "municipality": "Sample City"}}, {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-123.11760000000001, 49.28], [-123.1166, 49.28], [-123.1166, 49.281], [-123.11760000000001, 49.281], [-123.11760000000001, 49.28]]]}, "properties": {"parcelId": "012-345-673", "legalDesc": "LOT 3 DISTRICT LOT 123 PLAN EPP1003", "civicAddress": "103 Sample St", "municipality": "Sample City"}}, {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-123.12, 49.2812], [-123.119, 49.2812], [-123.119, 49.282199999999996], [-123.12, 49.282199999999996], [-123.12, 49.2812]]]}, "properties": {"parcelId": "012-345-674", "legalDesc": "LOT 4 DISTRICT LOT 123 PLAN EPP1004", "civicAddress": "104 Sample St", "municipality": "Sample City"}}, {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-123.11880000000001, 49.2812], [-123.1178, 49.2812], [-123.1178, 49.282199999999996], [-123.11880000000001, 49.282199999999996], [-123.11880000000001, 49.2812]]]}, "properties": {"parcelId": "012-345-675", "legalDesc": "LOT 5 DISTRICT LOT 123 PLAN EPP1005", "civicAddress": "105 Sample St", "municipality": "Sample City"}}, {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-123.11760000000001, 49.2812], [-123.1166, 49.2812], [-123.1166, 49.282199999999996], [-123.11760000000001, 49.282199999999996], [-123.11760000000001, 49.2812]]]}, "properties": {"parcelId": "012-345-676", "legalDesc": "LOT 6 DISTRICT LOT 123 PLAN EPP1006", "civicAddress": "106 Sample St", "municipality": "Sample City"}}]}
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "parcelId": "012-345-101" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0,0],[0,1],[1,1],[1,0],[0,0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "parcelId": "012-345-102" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[1,0],[1,1],[2,1],[2,0],[1,0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "parcelId": "012-345-103" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2,0],[2,1],[3,1],[3,0],[2,0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "parcelId": "012-345-104" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0,1],[0,2],[1,2],[1,1],[0,1]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "parcelId": "012-345-105" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[1,1],[1,2],[2,2],[2,1],[1,1]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "parcelId": "012-345-106" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2,1],[2,2],[3,2],[3,1],[2,1]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "parcelId": "012-345-107" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0,2],[0,3],[1,3],[1,2],[0,2]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "parcelId": "012-345-108" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[1,2],[1,3],[2,3],[2,2],[1,2]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "parcelId": "012-345-109" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2,2],[2,3],[3,3],[3,2],[2,2]]]
+      }
+    }
+  ]
+}
