@@ -1,100 +1,322 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Parcel 360° Demo</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <title>Parcel Demo (BC, Canada)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-sA+e2tu2Tqj1bWgGvZ3Ww7x6O9KpUQ5pU9Gt6Z8Jf6Q="
+    crossorigin=""
+  />
   <style>
-    body { margin:0; font-family: system-ui, Arial, sans-serif; }
-    header { background:#0b5cab; color:#fff; padding:10px 16px; font-weight:600; }
-    #map { height: calc(100vh - 56px); }
-    .legend { padding:8px; background:#fff; border:1px solid #ccc; position:absolute; top:70px; right:10px; z-index:9999; width:280px; }
-    .legend code { background:#f6f8fa; padding:1px 4px; border-radius:3px; }
-    .popup-table td { padding:2px 6px; vertical-align:top; }
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; width: 100%; }
+    /* Toolbar styling */
+    #toolbar {
+      position: absolute; z-index: 1000; top: 12px; left: 12px;
+      background: #fff; border: 1px solid #ddd; border-radius: 10px;
+      padding: 10px 12px; box-shadow: 0 2px 8px rgba(0,0,0,.08);
+      font-family: system-ui, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    #toolbar label { font-weight: 600; margin-right: 6px; }
+    #parcelSelect { min-width: 280px; padding: 6px; }
+    .leaflet-popup-content { margin: 10px 14px; }
   </style>
 </head>
 <body>
-  <header>Parcel 360° Demo — Synthetic Geo (Leaflet) + Optional API</header>
-  <div id="map"></div>
-  <div class="legend">
-    <strong>How it works</strong>
-    <ol>
-      <li>Click a parcel polygon.</li>
-      <li>If <code>API_BASE</code> is set in <code>config.js</code>, it fetches from the API.</li>
-      <li>Else, it uses local <code>parcel_views.json</code> (synthetic).</li>
-    </ol>
-    <div><b>Status:</b> <span id="status">Detecting...</span></div>
+
+  <!-- Top-left controls -->
+  <div id="toolbar">
+    <label for="parcelSelect">Jump to parcel:</label>
+    <select id="parcelSelect">
+      <option value="">— choose —</option>
+    </select>
   </div>
 
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script src="./config.js"></script>
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Config (defines window.API_BASE) -->
+  <script src="config.js"></script>
+
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-o9N1j7kGStbYv7vQkGx1nQ2e8lYH8k1L5l6Z8Z8aI7Q="
+    crossorigin=""
+  ></script>
+
   <script>
-    const statusEl = document.getElementById('status');
-    const API_BASE = (window.API_BASE || '').trim();
+  // ------------------------------
+  // Inline GeoJSON for BC, Canada
+  // 9 non-touching 1km-ish squares (degrees are approximate)
+  // Area roughly around Metro Vancouver (lat ~49.24, lon ~-123.14)
+  // ------------------------------
+  (function buildParcels() {
+    // Grid parameters: 3x3 squares with gaps so they don't touch
+    const minLon = -123.20;
+    const minLat =  49.22;
+    const size   =  0.01;   // ~1.1 km in lat; lon varies by latitude (fine for demo)
+    const gap    =  0.002;  // ~200m gaps so polygons don't touch
+    const ids = [
+      "012-345-101","012-345-102","012-345-103",
+      "012-345-104","012-345-105","012-345-106",
+      "012-345-107","012-345-108","012-345-109"
+    ];
 
-    const map = L.map('map').setView([49.280, -123.120], 17);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
-
-    function style() {
-      return { color: '#3b5bdb', weight: 1, fillColor: '#a5d8ff', fillOpacity: 0.5 };
-    }
-
-    // Load polygons
-    fetch('./synthetic_parcels.geojson')
-      .then(r => r.json())
-      .then(geo => {
-        const lyr = L.geoJSON(geo, {
-          style: style,
-          onEachFeature: (feature, layer) => {
-            layer.on('click', () => onParcelClick(feature, layer));
-          }
-        }).addTo(map);
-        map.fitBounds(lyr.getBounds(), { padding: [20,20] });
-      });
-
-    async function fetchParcelView(parcelId) {
-      if (API_BASE) {
-        statusEl.textContent = 'API mode';
-        try {
-          const r = await fetch(API_BASE.replace(/\/$/, '') + '/api/v1/parcels/' + parcelId);
-          if (!r.ok) throw new Error('API ' + r.status);
-          return await r.json();
-        } catch (e) {
-          console.warn('API fetch failed, falling back to local JSON', e);
-          statusEl.textContent = 'API failed → local JSON';
-          const locals = await (await fetch('./parcel_views.json')).json();
-          return locals[parcelId] || {};
-        }
-      } else {
-        statusEl.textContent = 'Local JSON mode';
-        const locals = await (await fetch('./parcel_views.json')).json();
-        return locals[parcelId] || {};
+    const features = [];
+    let k = 0;
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        const lon0 = minLon + c * (size + gap);
+        const lat0 = minLat + r * (size + gap);
+        const lon1 = lon0 + size;
+        const lat1 = lat0 + size;
+        const coords = [
+          [lon0, lat0], [lon0, lat1], [lon1, lat1], [lon1, lat0], [lon0, lat0]
+        ];
+        features.push({
+          type: "Feature",
+          properties: { parcelId: ids[k++] },
+          geometry: { type: "Polygon", coordinates: [coords] }
+        });
       }
     }
 
-    function makePopupHtml(d, pid) {
-      const owners = (d.owners||[]).map(o => o.name).join(', ');
-      const rrrs = (d.rrr||[]).map(r => (r.type||'') + (r.status? ' ('+r.status+')':'')).join(', ');
-      return `
-        <table class="popup-table">
-          <tr><td><b>Parcel</b></td><td>${pid}</td></tr>
-          <tr><td><b>Legal</b></td><td>${d.legalDesc||''}</td></tr>
-          <tr><td><b>Address</b></td><td>${d.civicAddress||''}</td></tr>
-          <tr><td><b>Title</b></td><td>${d.title?d.title.titleNumber:''} ${d.title? '('+d.title.status+')':''}</td></tr>
-          <tr><td><b>Owners</b></td><td>${owners}</td></tr>
-          <tr><td><b>RRR</b></td><td>${rrrs}</td></tr>
-          <tr><td><b>Plans</b></td><td>${(d.surveyPlans||[]).join(', ')}</td></tr>
-          <tr><td><b>Assessment</b></td><td>${d.assessment?d.assessment.totalValue:''}</td></tr>
-          <tr><td><b>Zoning</b></td><td>${d.zoning?d.zoning.code:''}</td></tr>
-        </table>`;
+    window.PARCELS_GEOJSON = {
+      type: "FeatureCollection",
+      features
+    };
+  })();
+
+  // ------------------------------
+  // UI helpers for popups
+  // ------------------------------
+  function fmtMoney(n) {
+    return (n === null || n === undefined)
+      ? "—"
+      : Number(n).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  }
+  function safe(v, fallback="—") { return (v === null || v === undefined || v === "") ? fallback : v; }
+  function pill(text) {
+    return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#eef;border:1px solid #ccd;margin-right:6px;margin-bottom:4px;">${text}</span>`;
+  }
+  function renderOwners(owners=[]) {
+    if (!owners.length) return "—";
+    return owners.map(o => {
+      const name = safe(o?.properties?.name || o?.name, "Unknown");
+      const share = safe(o?.properties?.share || o?.share, "");
+      return `<li>${name}${share ? ` <small style="opacity:.7">(${share})</small>` : ""}</li>`;
+    }).join("");
+  }
+  function renderRRRs(rrrs=[]) {
+    if (!rrrs.length) return "—";
+    return rrrs.map(r => {
+      const p = r.properties || r;
+      const bits = [safe(p.type, "RRR"), safe(p.status, ""), safe(p.holder||p.note||p.purpose||"", "")]
+        .filter(x => x && x !== "—");
+      return pill(bits.join(" • "));
+    }).join("");
+  }
+  function renderZoning(zonings=[]) {
+    if (!zonings.length) return "—";
+    return zonings.map(z => pill(safe((z.properties||z).zoneType,"Zoning"))).join("");
+  }
+  function renderPlans(plans=[]) {
+    if (!plans.length) return "—";
+    return plans.map(sp => {
+      const p = sp.properties || sp;
+      return pill(`${safe(p.planId,"Plan")} — ${safe(p.description,"")}`);
+    }).join("");
+  }
+  function renderAssessments(assessments=[]) {
+    if (!assessments.length) return "—";
+    return assessments.map(a => {
+      const p = a.properties || a;
+      return pill(`${safe(p.year,"Year")} — ${fmtMoney(p.value)}`);
+    }).join("");
+  }
+
+  // Works with API payload OR offline parcel_views.json shape
+  function renderParcelView(view) {
+    const parcel   = view.parcel?.properties ? view.parcel.properties : (view.parcel || view);
+    const titles   = view.titles || (view.title ? [view.title] : []);
+    const owners   = view.owners || [];
+    const rrrs     = view.rrrs || [];
+    const plans    = view.plans || (view.surveyPlan ? [view.surveyPlan] : []);
+    const assess   = view.assessments || (view.assessment ? [view.assessment] : []);
+    const zonings  = view.zonings || (view.zoning ? [view.zoning] : []);
+
+    const pid = safe(parcel?.parcelId, "Unknown");
+    const legal = safe(parcel?.legalDescription, "—");
+
+    const titleBadges = titles.length
+      ? titles.map(t => {
+          const p = t.properties || t;
+          return pill(`${safe(p.titleId,"Title")} — ${safe(p.status,"")}`);
+        }).join("")
+      : "—";
+
+    return `
+    <div style="font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;min-width:280px;max-width:380px">
+      <div style="margin-bottom:8px">
+        <div style="font-weight:700;font-size:16px;line-height:1.2">Parcel ${pid}</div>
+        <div style="color:#555;margin-top:2px">${legal}</div>
+      </div>
+
+      <div style="margin:10px 0">
+        <div style="font-weight:600;margin-bottom:4px">Title</div>
+        <div>${titleBadges}</div>
+      </div>
+
+      <div style="margin:10px 0">
+        <div style="font-weight:600;margin-bottom:4px">Owner(s)</div>
+        <ul style="margin:0;padding-left:18px">${renderOwners(owners)}</ul>
+      </div>
+
+      <div style="margin:10px 0">
+        <div style="font-weight:600;margin-bottom:4px">RRR</div>
+        <div>${renderRRRs(rrrs)}</div>
+      </div>
+
+      <div style="margin:10px 0">
+        <div style="font-weight:600;margin-bottom:4px">Zoning</div>
+        <div>${renderZoning(zonings)}</div>
+      </div>
+
+      <div style="margin:10px 0">
+        <div style="font-weight:600;margin-bottom:4px">Survey Plan</div>
+        <div>${renderPlans(plans)}</div>
+      </div>
+
+      <div style="margin:10px 0">
+        <div style="font-weight:600;margin-bottom:4px">Assessment</div>
+        <div>${renderAssessments(assess)}</div>
+      </div>
+
+      <div style="margin-top:12px;font-size:12px;opacity:.7">
+        Source: ${window.API_BASE ? "Live API" : "Local JSON"}
+      </div>
+    </div>`;
+  }
+
+  // ------------------------------
+  // Map init (BC, Canada)
+  // ------------------------------
+  const map = L.map('map', {
+    center: [49.25, -123.12], // Vancouver-ish
+    zoom: 12
+  });
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  // ------------------------------
+  // Layer + dropdown wiring
+  // ------------------------------
+  const byParcelId = new Map();
+  let geoLayer;
+
+  async function openParcelPopup(parcelId, layer) {
+    try {
+      let data;
+      if (window.API_BASE) {
+        const res = await fetch(`${window.API_BASE}/api/v1/parcels/${encodeURIComponent(parcelId)}`);
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        data = await res.json();
+      } else {
+        const res = await fetch('parcel_views.json');
+        if (!res.ok) throw new Error(`local JSON ${res.status}`);
+        const views = await res.json();
+        data = views[parcelId];
+        if (!data) throw new Error(`parcel ${parcelId} not found in parcel_views.json`);
+      }
+      layer.bindPopup(renderParcelView(data), { maxWidth: 420 }).openPopup();
+    } catch (e) {
+      console.error(e);
+      layer.bindPopup(
+        `<b>Could not load parcel ${parcelId}</b><br/><small>${String(e.message||e)}</small>`
+      ).openPopup();
+    }
+  }
+
+  function addParcelsLayer() {
+    geoLayer = L.geoJSON(window.PARCELS_GEOJSON, {
+      style: { color: "#1f78b4", weight: 2, fillOpacity: 0.15 },
+      onEachFeature: (feature, layer) => {
+        const pid = feature?.properties?.parcelId;
+        if (pid) byParcelId.set(pid, layer);
+        layer.on('click', () => openParcelPopup(pid, layer));
+      }
+    }).addTo(map);
+
+    const b = geoLayer.getBounds();
+    if (b.isValid()) map.fitBounds(b.pad(0.2));
+  }
+
+  async function populateDropdown() {
+    const select = document.getElementById('parcelSelect');
+
+    if (window.API_BASE) {
+      // Populate from API
+      try {
+        const res = await fetch(`${window.API_BASE}/api/v1/parcels?limit=500&props=1`);
+        const data = await res.json();
+        for (const item of (data.items || [])) {
+          const opt = document.createElement('option');
+          opt.value = item.parcelId;
+          opt.textContent = item.legalDescription
+            ? `${item.parcelId} — ${item.legalDescription}`
+            : item.parcelId;
+          select.appendChild(opt);
+        }
+      } catch {
+        // Fallback to local
+        await populateFromLocalViews(select);
+      }
+    } else {
+      await populateFromLocalViews(select);
     }
 
-    async function onParcelClick(feature, layer) {
-      const pid = feature.properties.parcelId;
-      const data = await fetchParcelView(pid);
-      layer.bindPopup(makePopupHtml(data, pid)).openPopup();
+    select.addEventListener('change', () => {
+      const pid = select.value;
+      if (!pid) return;
+      const layer = byParcelId.get(pid);
+      if (layer) {
+        const bounds = layer.getBounds?.();
+        if (bounds?.isValid()) map.fitBounds(bounds.pad(0.3));
+        openParcelPopup(pid, layer);
+      } else {
+        alert(`Parcel ${pid} not found in the map layer (check parcel IDs).`);
+      }
+    });
+  }
+
+  async function populateFromLocalViews(select) {
+    try {
+      const res = await fetch('parcel_views.json');
+      const views = await res.json();
+      Object.keys(views).sort().forEach(pid => {
+        const desc = views[pid]?.legalDescription || '';
+        const opt = document.createElement('option');
+        opt.value = pid;
+        opt.textContent = desc ? `${pid} — ${desc}` : pid;
+        select.appendChild(opt);
+      });
+    } catch (e) {
+      console.warn("Could not load parcel_views.json for dropdown:", e);
     }
+  }
+
+  // Init
+  addParcelsLayer();
+  populateDropdown();
   </script>
 </body>
 </html>

@@ -31,15 +31,17 @@ def send_json(data, status=200):
     Return JSON. If the querystring includes ?pretty=1, pretty-print it.
     """
     if request.args.get("pretty"):
-        return Response(json.dumps(data, indent=2, sort_keys=True),
-                        status=status, mimetype="application/json")
-    # jsonify sets the correct mimetype and handles ascii etc.
+        return Response(
+            json.dumps(data, indent=2, sort_keys=True),
+            status=status,
+            mimetype="application/json"
+        )
     resp = jsonify(data)
     resp.status_code = status
     return resp
 
 def node_to_dict(n):
-    """Convert a Neo4j Node to plain dict for JSON serialization."""
+    """Convert a Neo4j Node to a plain dict for JSON serialization."""
     if n is None:
         return None
     return {
@@ -57,7 +59,7 @@ def index():
         "neo4j_connected": bool(driver),
         "service": "parcel-backend",
         "status": "ok",
-        "try": ["/health", "/api/v1/parcels/012-345-678"],
+        "try": ["/health", "/api/v1/parcels", "/api/v1/parcels/012-345-101"]
     })
 
 @app.route("/health")
@@ -107,6 +109,60 @@ def get_parcel(parcel_id):
     except Exception as e:
         app.logger.exception("Error fetching parcel %s", parcel_id)
         return send_json({"error": "Internal Server Error", "detail": str(e)}, status=500)
+
+@app.route("/api/v1/parcels")
+def list_parcels():
+    """
+    List parcel IDs (and optional basic props).
+    Query params:
+      - q: prefix filter, e.g. q=012-345-10
+      - limit: max results (default 100)
+      - offset: skip N (default 0)
+      - props: if "1", include legalDescription
+    """
+    if not driver:
+        return send_json({"error": "Neo4j not configured"}, status=503)
+
+    q = (request.args.get("q") or "").strip()
+    try:
+        limit = min(int(request.args.get("limit") or 100), 1000)
+    except ValueError:
+        limit = 100
+    try:
+        offset = max(int(request.args.get("offset") or 0), 0)
+    except ValueError:
+        offset = 0
+    want_props = request.args.get("props") == "1"
+
+    cypher = """
+        MATCH (p:Parcel)
+        WHERE $q = "" OR p.parcelId STARTS WITH $q
+        RETURN p.parcelId AS parcelId, p.legalDescription AS legalDescription
+        ORDER BY parcelId
+        SKIP $offset
+        LIMIT $limit
+    """
+
+    with driver.session() as session:
+        rows = session.run(
+            cypher,
+            q=q,
+            offset=offset,
+            limit=limit
+        ).data()
+
+    items = (
+        [{"parcelId": r["parcelId"], "legalDescription": r["legalDescription"]} for r in rows]
+        if want_props
+        else [{"parcelId": r["parcelId"]} for r in rows]
+    )
+
+    return send_json({
+        "count": len(items),
+        "offset": offset,
+        "limit": limit,
+        "items": items
+    })
 
 # ----------------------------
 # Local dev runner
