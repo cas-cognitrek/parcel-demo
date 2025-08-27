@@ -1,32 +1,74 @@
-// Clear existing data
 MATCH (n) DETACH DELETE n;
+// -----------------------------
+// 0) OPTIONAL: upgrade unlabeled parcel
+//    If a node exists with parcelId but no :Parcel label, add the label
+// -----------------------------
+MATCH (n {parcelId: "012-345-678"})
+WHERE NOT n:Parcel
+SET n:Parcel;
 
-// Create a sample parcel
-CREATE (p:Parcel {parcelId: "012-345-678", legalDescription: "Lot 1, District Lot 1234, Plan 5678"});
+// -----------------------------
+// 1) Constraints (safe to re-run)
+// -----------------------------
+CREATE CONSTRAINT parcel_id IF NOT EXISTS
+FOR (p:Parcel) REQUIRE p.parcelId IS UNIQUE;
 
-// Title + owner
-CREATE (t:Title {titleId: "T-1001", status: "Active"})
-CREATE (o:Owner {ownerId: "O-2001", name: "Alice Example"})
-CREATE (p)-[:HAS_TITLE]->(t)
-CREATE (t)-[:OWNED_BY]->(o);
+CREATE CONSTRAINT title_id IF NOT EXISTS
+FOR (t:Title) REQUIRE t.titleId IS UNIQUE;
 
-// Right / restriction / responsibility (RRR)
-CREATE (r:RRR {rrrId: "R-3001", type: "Mortgage", status: "Active"})
-CREATE (p)-[:HAS_RRR]->(r);
+CREATE CONSTRAINT owner_id IF NOT EXISTS
+FOR (o:Owner) REQUIRE o.ownerId IS UNIQUE;
 
-// Survey plan
-CREATE (sp:SurveyPlan {planId: "SP-4001", description: "Registered Survey Plan"})
-CREATE (p)-[:HAS_PLAN]->(sp);
+CREATE CONSTRAINT rrr_id IF NOT EXISTS
+FOR (r:RRR) REQUIRE r.rrrId IS UNIQUE;
 
-// Assessment
-CREATE (a:Assessment {assessmentId: "A-5001", year: 2024, value: 850000})
-CREATE (p)-[:HAS_ASSESSMENT]->(a);
+CREATE CONSTRAINT plan_id IF NOT EXISTS
+FOR (sp:SurveyPlan) REQUIRE sp.planId IS UNIQUE;
 
-// Zoning
-CREATE (z:Zoning {zoneId: "Z-6001", zoneType: "Residential"})
-CREATE (p)-[:HAS_ZONING]->(z);
+CREATE CONSTRAINT assess_id IF NOT EXISTS
+FOR (a:Assessment) REQUIRE a.assessmentId IS UNIQUE;
 
-// Return parcel with connected nodes
+CREATE CONSTRAINT zone_id IF NOT EXISTS
+FOR (z:Zoning) REQUIRE z.zoneId IS UNIQUE;
+
+// -----------------------------
+// 2) Upsert the parcel + related nodes
+//    (MERGE ensures no duplicates; SET only on create)
+// -----------------------------
+MERGE (p:Parcel {parcelId: "012-345-678"})
+  ON CREATE SET p.legalDescription = "Lot 1, District Lot 1234, Plan 5678";
+
+MERGE (t:Title {titleId: "T-1001"})
+  ON CREATE SET t.status = "Active";
+
+MERGE (o:Owner {ownerId: "O-2001"})
+  ON CREATE SET o.name = "Alice Example";
+
+MERGE (r:RRR {rrrId: "R-3001"})
+  ON CREATE SET r.type = "Mortgage", r.status = "Active";
+
+MERGE (sp:SurveyPlan {planId: "SP-4001"})
+  ON CREATE SET sp.description = "Registered Survey Plan";
+
+MERGE (a:Assessment {assessmentId: "A-5001"})
+  ON CREATE SET a.year = 2024, a.value = 850000;
+
+MERGE (z:Zoning {zoneId: "Z-6001"})
+  ON CREATE SET z.zoneType = "Residential";
+
+// -----------------------------
+// 3) Attach relationships to the SAME parcel
+// -----------------------------
+MERGE (p)-[:HAS_TITLE]->(t)
+MERGE (t)-[:OWNED_BY]->(o)
+MERGE (p)-[:HAS_RRR]->(r)
+MERGE (p)-[:HAS_PLAN]->(sp)
+MERGE (p)-[:HAS_ASSESSMENT]->(a)
+MERGE (p)-[:HAS_ZONING]->(z);
+
+// -----------------------------
+// 4) Return for visual check
+// -----------------------------
 MATCH (p:Parcel {parcelId: "012-345-678"})
-OPTIONAL MATCH (p)-[r]-(n)
-RETURN p, collect(r), collect(n);
+OPTIONAL MATCH (p)-[rel]-(n)
+RETURN p, rel, n;
