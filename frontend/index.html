@@ -24,13 +24,10 @@
       --pill-bd:#cfd8ff;
       --brand:#1f78b4;
     }
-
     html, body { height: 100%; margin: 0; }
     body { font-family: system-ui, Segoe UI, Roboto, Arial, sans-serif; color: var(--text); }
-
-    /* Map must have a height or it won't show */
+    /* Map */
     #map { position: absolute; inset: 0; }
-
     /* Floating toolbar */
     #toolbar {
       position: absolute; z-index: 1000; top: 14px; left: 14px;
@@ -46,11 +43,8 @@
     #modeBadge {
       min-width: auto; background: var(--pill-bg); border-color: var(--pill-bd); font-size: 12px;
     }
-
-    /* Popup spacing a bit tighter than Leaflet default */
     .leaflet-popup-content { margin: 10px 14px; }
-
-    /* Mini legend card (optional) */
+    /* Legend */
     #legend {
       position: absolute; z-index: 1000; bottom: 14px; left: 14px;
       background: var(--panel-bg); border: 1px solid var(--panel-bd);
@@ -58,11 +52,17 @@
       font-size: 13px; color: var(--muted);
     }
     .chip{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--pill-bg);border:1px solid var(--pill-bd);margin-right:6px;margin-bottom:4px;}
+    /* Embedded graph panel */
+    #graph {
+      position:absolute; right:14px; bottom:14px; z-index:1000;
+      width:420px; height:300px; background:#fff; border:1px solid var(--panel-bd);
+      border-radius:12px; box-shadow:var(--shadow); overflow:hidden;
+    }
   </style>
 </head>
 <body>
 
-  <!-- Top-left controls -->
+  <!-- Controls -->
   <div id="toolbar">
     <label for="parcelSelect">Jump to parcel:</label>
     <select id="parcelSelect">
@@ -71,7 +71,7 @@
     <span id="modeBadge"></span>
   </div>
 
-  <!-- Bottom-left legend (optional) -->
+  <!-- Legend -->
   <div id="legend">
     <div><b>Demo parcels (BC)</b></div>
     <div style="margin-top:4px">Click a polygon or pick from the dropdown.</div>
@@ -80,7 +80,10 @@
   <!-- Map -->
   <div id="map"></div>
 
-  <!-- Your config (defines window.API_BASE) -->
+  <!-- Embedded Neo4j mini-graph -->
+  <div id="graph"></div>
+
+  <!-- Config (defines window.API_BASE) -->
   <script src="config.js"></script>
 
   <!-- Leaflet JS -->
@@ -89,18 +92,18 @@
     integrity="sha256-o9N1j7kGStbYv7vQkGx1nQ2e8lYH8k1L5l6Z8Z8aI7Q="
     crossorigin=""
   ></script>
+  <!-- Cytoscape for the mini-graph -->
+  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
 
   <script>
   // =========================================================
-  // 1) Inline GeoJSON: 9 non-touching squares in Metro Vancouver
+  // 1) Inline GeoJSON: 9 non-touching squares near Vancouver
   // =========================================================
   (function buildParcels(){
-    // Simple 3x3 grid with gaps so polygons do NOT touch.
-    // Coordinates around Vancouver (approx).
     const minLon = -123.20;  // west
     const minLat =  49.22;   // south
-    const size   =  0.010;   // ~1.1km squares
-    const gap    =  0.002;   // ~200m gaps
+    const size   =  0.010;   // ~1.1km square
+    const gap    =  0.002;   // ~200m gap (no touching)
 
     const ids = [
       "012-345-101","012-345-102","012-345-103",
@@ -132,59 +135,54 @@
   // 2) Helpers for popup rendering
   // =========================================================
   const $mode = document.getElementById('modeBadge');
-  function setModeBadge(){
-    $mode.textContent = window.API_BASE ? "Mode: Live API" : "Mode: Local JSON";
-  }
+  function setModeBadge(){ $mode.textContent = window.API_BASE ? "Mode: Live API" : "Mode: Local JSON"; }
   setModeBadge();
 
-  function money(n){
-    if(n===null || n===undefined || isNaN(n)) return "—";
-    return Number(n).toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:0});
-  }
-  function safe(v, d="—"){ return (v===null||v===undefined||v==="") ? d : v; }
+  function money(n){ if(n===null||n===undefined||isNaN(n)) return "—"; return Number(n).toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:0}); }
+  function safe(v,d="—"){ return (v===null||v===undefined||v==="")?d:v; }
   function chip(txt){ return `<span class="chip">${txt}</span>`; }
 
   function renderOwners(owners=[]){
     if(!owners.length) return "—";
     return owners.map(o=>{
-      const p = o.properties || o;
-      const nm = safe(p.name,"Unknown");
-      const sh = p.share ? ` <small style="opacity:.7">(${p.share})</small>` : "";
+      const p=o.properties||o;
+      const nm=safe(p.name,"Unknown");
+      const sh=p.share?` <small style="opacity:.7">(${p.share})</small>`:"";
       return `<li>${nm}${sh}</li>`;
     }).join("");
   }
   function renderRRR(rrrs=[]){
     if(!rrrs.length) return "—";
     return rrrs.map(r=>{
-      const p = r.properties || r;
-      const bits = [safe(p.type,"RRR"), p.status||"", p.holder||p.purpose||p.note||""].filter(Boolean);
+      const p=r.properties||r;
+      const bits=[safe(p.type,"RRR"), p.status||"", p.holder||p.purpose||p.note||""].filter(Boolean);
       return chip(bits.join(" • "));
     }).join("");
   }
   function renderPlans(plans=[]){
     if(!plans.length) return "—";
     return plans.map(sp=>{
-      const p = sp.properties || sp;
+      const p=sp.properties||sp;
       return chip(`${safe(p.planId,"Plan")} — ${safe(p.description,"")}`);
     }).join("");
   }
   function renderAssess(ass=[]){
     if(!ass.length) return "—";
     return ass.map(a=>{
-      const p = a.properties || a;
+      const p=a.properties||a;
       return chip(`${safe(p.year,"Year")} — ${money(p.value)}`);
     }).join("");
   }
   function renderZoning(zs=[]){
     if(!zs.length) return "—";
     return zs.map(z=>{
-      const p = z.properties || z;
+      const p=z.properties||z;
       return chip(safe(p.zoneType,"Zoning"));
     }).join("");
   }
 
   function renderParcelView(view){
-    // normalize shapes (API vs local)
+    // normalize (API vs local)
     const parcel   = view.parcel?.properties ? view.parcel.properties : (view.parcel||view);
     const titles   = view.titles || (view.title ? [view.title] : []);
     const owners   = view.owners || [];
@@ -245,7 +243,7 @@
   }
 
   // =========================================================
-  // 3) Map + layer + dropdown
+  // 3) Map + polygons + dropdown
   // =========================================================
   const map = L.map('map', { center:[49.25,-123.12], zoom: 12 });
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -256,6 +254,13 @@
   const byParcelId = new Map();
   const $select = document.getElementById('parcelSelect');
   let geoLayer;
+  let highlighted;
+
+  function highlight(layer){
+    if (highlighted) highlighted.setStyle({ color:"#1f78b4", weight:2, fillOpacity:.15 });
+    highlighted = layer;
+    layer.setStyle({ color:"#d81b60", weight:3, fillOpacity:.25 });
+  }
 
   function addParcelsLayer(){
     geoLayer = L.geoJSON(window.PARCELS_GEOJSON, {
@@ -264,7 +269,10 @@
         const pid = feature?.properties?.parcelId;
         if (pid) byParcelId.set(pid, layer);
 
-        layer.on('click', () => openParcel(pid, layer));
+        layer.on('click', () => {
+          highlight(layer);
+          openParcel(pid, layer);
+        });
       }
     }).addTo(map);
 
@@ -296,7 +304,6 @@
   }
 
   async function populateDropdown(){
-    // If API available, use it (includes legalDescription with props=1)
     if (window.API_BASE){
       try{
         const res = await fetch(`${window.API_BASE}/api/v1/parcels?limit=500&props=1`);
@@ -308,7 +315,6 @@
           $select.appendChild(opt);
         });
       }catch(e){
-        // Fall back to local JSON
         await populateFromLocal();
       }
     } else {
@@ -322,7 +328,9 @@
       if (lyr){
         const b = lyr.getBounds?.();
         if (b?.isValid()) map.fitBounds(b.pad(0.3));
+        highlight(lyr);
         openParcel(pid, lyr);
+        loadParcelGraph(pid); // keep graph in sync
       } else {
         alert(`Parcel ${pid} not found in the map layer.`);
       }
@@ -345,9 +353,107 @@
     }
   }
 
+  // =========================================================
+  // 4) Embedded Neo4j graph (Cytoscape) — API mode
+  // =========================================================
+  let cy;
+  function initGraph() {
+    cy = cytoscape({
+      container: document.getElementById('graph'),
+      elements: [],
+      style: [
+        { selector: 'node',
+          style: {
+            'label': 'data(label)',
+            'text-valign': 'center',
+            'color': '#1b1f24',
+            'font-size': 10,
+            'background-color': '#F5F7FA',
+            'border-width': 2,
+            'border-color': '#9AA1AC'
+          }
+        },
+        { selector: 'node[labelType = "Parcel"]',
+          style: { 'background-color': '#ff6b6b', 'border-color': '#e35151' }
+        },
+        { selector: 'node[labelType = "Title"]',
+          style: { 'background-color': '#51cf66', 'border-color': '#37b24d' }
+        },
+        { selector: 'node[labelType = "Owner"]',
+          style: { 'background-color': '#4dabf7', 'border-color': '#228be6' }
+        },
+        { selector: 'node[labelType = "RRR"]',
+          style: { 'background-color': '#ffa94d', 'border-color': '#f08c00' }
+        },
+        { selector: 'node[labelType = "SurveyPlan"]',
+          style: { 'background-color': '#b197fc', 'border-color': '#845ef7' }
+        },
+        { selector: 'node[labelType = "Assessment"]',
+          style: { 'background-color': '#63e6be', 'border-color': '#20c997' }
+        },
+        { selector: 'node[labelType = "Zoning"]',
+          style: { 'background-color': '#ffd43b', 'border-color': '#f59f00' }
+        },
+        { selector: 'edge',
+          style: {
+            'label': 'data(type)',
+            'width': 2,
+            'line-color': '#B7BEC9',
+            'target-arrow-color': '#B7BEC9',
+            'target-arrow-shape': 'triangle',
+            'curve-style': 'bezier',
+            'font-size': 8
+          }
+        }
+      ],
+      layout: { name: 'concentric', minNodeSpacing: 40 }
+    });
+  }
+
+  async function loadParcelGraph(parcelId) {
+    if (!window.API_BASE) return; // graph only in API mode
+    try {
+      const res = await fetch(`${window.API_BASE}/api/v1/graph/parcel/${encodeURIComponent(parcelId)}`);
+      const g = await res.json();
+
+      const nodes = (g.nodes || []).map(n => {
+        const labelType = (n.labels && n.labels[0]) || 'Node';
+        const label =
+          labelType === 'Parcel'     ? (n.props.parcelId || 'Parcel') :
+          labelType === 'Title'      ? (n.props.titleId  || 'Title')  :
+          labelType === 'Owner'      ? (n.props.name     || 'Owner')  :
+          labelType === 'RRR'        ? (n.props.type     || 'RRR')    :
+          labelType === 'SurveyPlan' ? (n.props.planId   || 'Plan')   :
+          labelType === 'Assessment' ? (String(n.props.year || n.props.assessmentId || 'Assess')) :
+          labelType === 'Zoning'     ? (n.props.zoneType || n.props.zoneId || 'Zoning') :
+          labelType;
+        return { data: { id: n.id, label, labelType } };
+      });
+
+      const edges = (g.links || []).map(e => ({
+        data: { id: e.id, source: e.source, target: e.target, type: e.type }
+      }));
+
+      cy.elements().remove();
+      cy.add([...nodes, ...edges]);
+      cy.layout({ name: 'concentric', minNodeSpacing: 40 }).run();
+      cy.fit(undefined, 30);
+    } catch (e) {
+      console.warn("Graph load failed:", e);
+    }
+  }
+
+  // Re-wrap openParcel to also refresh the graph
+  const _openParcelOrig = openParcel;
+  openParcel = async function(pid, layer) {
+    await _openParcelOrig(pid, layer);
+    loadParcelGraph(pid);
+  };
+
   // Boot
   addParcelsLayer();
   populateDropdown();
+  initGraph();
   </script>
 </body>
 </html>

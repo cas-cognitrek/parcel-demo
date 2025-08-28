@@ -53,6 +53,59 @@ def node_to_dict(n):
 # ----------------------------
 # Routes
 # ----------------------------
+@app.route("/api/v1/graph/parcel/<parcel_id>")
+def graph_for_parcel(parcel_id):
+    """
+    Returns a small graph centered on a parcel:
+      nodes:  the Parcel and all 1-hop neighbors
+      links:  relationships among them
+    Shape:
+    {
+      "nodes":[{"id":"<eid>","labels":["Parcel"],"props":{...}}, ...],
+      "links":[{"id":"<eid>","type":"HAS_TITLE","source":"<eid>","target":"<eid>"}]
+    }
+    """
+    if not driver:
+        return send_json({"error": "Neo4j not configured"}, status=503)
+
+    q = """
+    MATCH (p:Parcel {parcelId:$parcel_id})
+    OPTIONAL MATCH (p)-[r]-(m)
+    WITH p, collect(DISTINCT m) AS ms, collect(DISTINCT r) AS rs
+    RETURN p, ms AS others, rs AS rels
+    """
+    try:
+        with driver.session() as s:
+            rec = s.run(q, parcel_id=parcel_id).single()
+
+        if not rec or not rec["p"]:
+            return send_json({"nodes": [], "links": []})
+
+        def n2d(n):
+            return {
+                "id": getattr(n, "element_id", None),
+                "labels": list(getattr(n, "labels", [])),
+                "props": dict(n),
+            }
+
+        def r2d(r):
+            return {
+                "id": getattr(r, "element_id", None),
+                "type": r.type,
+                "source": getattr(r.start_node, "element_id", None),
+                "target": getattr(r.end_node, "element_id", None),
+                "props": dict(r),
+            }
+
+        center = n2d(rec["p"])
+        others = [n2d(x) for x in rec["others"] if x]
+        rels   = [r2d(x) for x in rec["rels"] if x]
+
+        return send_json({"nodes": [center, *others], "links": rels})
+    except Exception as e:
+        app.logger.exception("graph_for_parcel error")
+        return send_json({"error":"Internal Server Error","detail":str(e)}, status=500)
+
 @app.route("/")
 def index():
     return send_json({
