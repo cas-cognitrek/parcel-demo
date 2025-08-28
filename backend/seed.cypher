@@ -1,102 +1,83 @@
 MATCH (n) DETACH DELETE n;
-// =====================================================
-// Parcel Demo — Multi-Parcel Seed (9 parcels)
-// Safe to re-run (MERGE + IF NOT EXISTS)
-// =====================================================
+////////////////////////////////////////////////////////////////////////
+// DEMO SEED — 9 parcels with full labels & relationships
+// Parcels: 012-345-101 … 012-345-109
+////////////////////////////////////////////////////////////////////////
 
-// --- OPTIONAL: wipe graph for a clean slate ---
-// MATCH (n) DETACH DELETE n;
+/* Optional: wipe previous demo data
+MATCH (n) DETACH DELETE n;
+*/
 
-// ---------- Constraints (one-time) ----------
-CREATE CONSTRAINT parcel_id IF NOT EXISTS
-FOR (p:Parcel) REQUIRE p.parcelId IS UNIQUE;
+/* Constraints (safe to re-run) */
+CREATE CONSTRAINT IF NOT EXISTS FOR (p:Parcel)      REQUIRE p.parcelId       IS UNIQUE;
+CREATE CONSTRAINT IF NOT EXISTS FOR (t:Title)       REQUIRE t.titleId        IS UNIQUE;
+CREATE CONSTRAINT IF NOT EXISTS FOR (o:Owner)       REQUIRE o.ownerId        IS UNIQUE;
+CREATE CONSTRAINT IF NOT EXISTS FOR (r:RRR)         REQUIRE r.rrrId          IS UNIQUE;
+CREATE CONSTRAINT IF NOT EXISTS FOR (sp:SurveyPlan) REQUIRE sp.planId        IS UNIQUE;
+CREATE CONSTRAINT IF NOT EXISTS FOR (a:Assessment)  REQUIRE a.assessmentId   IS UNIQUE;
+CREATE CONSTRAINT IF NOT EXISTS FOR (z:Zoning)      REQUIRE z.zoneId         IS UNIQUE;
 
-CREATE CONSTRAINT title_id IF NOT EXISTS
-FOR (t:Title) REQUIRE t.titleId IS UNIQUE;
+/* Seed 9 parcels with a consistent “star” around each */
+UNWIND range(101, 109) AS i
+WITH
+  i,
+  "012-345-" + i               AS pid,
+  "T-" + i                     AS tid,
+  "O-" + i                     AS oid,
+  "R-" + i                     AS rid,
+  "SP-" + i                    AS spid,
+  "A-" + i                     AS aid,
+  "Z-" + i                     AS zid,
+  CASE WHEN i % 2 = 0 THEN "Mortgage" ELSE "Lease" END AS rrrType,
+  CASE WHEN i % 3 = 0 THEN "Commercial" ELSE "Residential" END AS zoneType
 
-CREATE CONSTRAINT owner_id IF NOT EXISTS
-FOR (o:Owner) REQUIRE o.ownerId IS UNIQUE;
+// Parcel
+MERGE (p:Parcel {parcelId: pid})
+  ON CREATE SET
+    p.legalDescription = "Lot " + i + ", District Lot 1234, Plan " + (5600 + i),
+    p.createdAt = datetime()
 
-CREATE CONSTRAINT rrr_id IF NOT EXISTS
-FOR (r:RRR) REQUIRE r.rrrId IS UNIQUE;
+// Title
+MERGE (t:Title {titleId: tid})
+  ON CREATE SET t.status = "Active", t.issueDate = date("2024-07-01")
 
-CREATE CONSTRAINT plan_id IF NOT EXISTS
-FOR (sp:SurveyPlan) REQUIRE sp.planId IS UNIQUE;
+// Owner
+MERGE (o:Owner {ownerId: oid})
+  ON CREATE SET o.name = "Owner " + i
 
-CREATE CONSTRAINT assess_id IF NOT EXISTS
-FOR (a:Assessment) REQUIRE a.assessmentId IS UNIQUE;
+// RRR (e.g., Mortgage / Lease)
+MERGE (r:RRR {rrrId: rid})
+  ON CREATE SET r.type = rrrType, r.status = "Registered"
 
-CREATE CONSTRAINT zone_id IF NOT EXISTS
-FOR (z:Zoning) REQUIRE z.zoneId IS UNIQUE;
+// Survey Plan
+MERGE (sp:SurveyPlan {planId: spid})
+  ON CREATE SET sp.description = "Registered Survey Plan " + spid
 
-// -----------------------------------------------------
-// Parcels 101–106 (from earlier script)
-// -----------------------------------------------------
-// ... keep your existing Parcel A–F blocks here ...
+// Assessment
+MERGE (a:Assessment {assessmentId: aid})
+  ON CREATE SET a.year = 2025, a.value = 500000 + (i * 10000)
 
-// -----------------------------------------------------
-// Parcel 107: Strata/condo, 4 owners (25% each)
-// -----------------------------------------------------
-MERGE (p107:Parcel {parcelId: "012-345-107"})
-  ON CREATE SET p107.legalDescription = "Strata Lot 7, DL 1007, Plan 9007";
-MERGE (t107:Title {titleId: "T-1007"}) ON CREATE SET t107.status = "Active";
+// Zoning
+MERGE (z:Zoning {zoneId: zid})
+  ON CREATE SET z.zoneType = zoneType
 
-MERGE (o107a:Owner {ownerId: "O-2009"}) ON CREATE SET o107a.name = "George Example";
-MERGE (o107b:Owner {ownerId: "O-2010"}) ON CREATE SET o107b.name = "Hannah Example";
-MERGE (o107c:Owner {ownerId: "O-2011"}) ON CREATE SET o107c.name = "Irene Example";
-MERGE (o107d:Owner {ownerId: "O-2012"}) ON CREATE SET o107d.name = "Jack Example";
+// Relationships (idempotent)
+MERGE (p)-[:HAS_TITLE]->(t)
+MERGE (t)-[:OWNED_BY]->(o)
+MERGE (p)-[:HAS_RRR]->(r)
+MERGE (p)-[:HAS_PLAN]->(sp)
+MERGE (p)-[:HAS_ASSESSMENT]->(a)
+MERGE (p)-[:HAS_ZONING]->(z);
 
-MERGE (sp107:SurveyPlan {planId: "SP-4007"}) ON CREATE SET sp107.description = "Strata Plan 4007";
-MERGE (a107:Assessment {assessmentId: "A-5007"}) ON CREATE SET a107.year = 2025, a107.value = 450000;
-MERGE (z107:Zoning {zoneId: "Z-6007"}) ON CREATE SET z107.zoneType = "MultiFamily";
+////////////////////////////////////////////////////////////////////////
+// Quick sanity checks
+////////////////////////////////////////////////////////////////////////
 
-MERGE (p107)-[:HAS_TITLE]->(t107)
-MERGE (t107)-[:OWNED_BY {share:"25%"}]->(o107a)
-MERGE (t107)-[:OWNED_BY {share:"25%"}]->(o107b)
-MERGE (t107)-[:OWNED_BY {share:"25%"}]->(o107c)
-MERGE (t107)-[:OWNED_BY {share:"25%"}]->(o107d)
-MERGE (p107)-[:HAS_PLAN]->(sp107)
-MERGE (p107)-[:HAS_ASSESSMENT]->(a107)
-MERGE (p107)-[:HAS_ZONING]->(z107);
+/* Count by label */
+MATCH (n) RETURN labels(n) AS label, count(*) AS n ORDER BY n DESC;
 
-// -----------------------------------------------------
-// Parcel 108: Government-owned (Crown Land)
-// -----------------------------------------------------
-MERGE (p108:Parcel {parcelId: "012-345-108"})
-  ON CREATE SET p108.legalDescription = "Parcel 8, Crown Land, DL 1008, Plan 9008";
-MERGE (t108:Title {titleId: "T-1008"}) ON CREATE SET t108.status = "Active";
-MERGE (o108:Owner {ownerId: "O-2013"})
-  ON CREATE SET o108.name = "Province of British Columbia", o108.type = "Government";
+/* See the star for one parcel */
+MATCH (p:Parcel {parcelId:"012-345-101"})-[r]-(x) RETURN p,r,x;
 
-MERGE (sp108:SurveyPlan {planId: "SP-4008"}) ON CREATE SET sp108.description = "Crown Survey Plan 4008";
-MERGE (a108:Assessment {assessmentId: "A-5008"}) ON CREATE SET a108.year = 2025, a108.value = 0; // exempt
-MERGE (z108:Zoning {zoneId: "Z-6008"}) ON CREATE SET z108.zoneType = "Crown";
-
-MERGE (p108)-[:HAS_TITLE]->(t108)
-MERGE (t108)-[:OWNED_BY]->(o108)
-MERGE (p108)-[:HAS_PLAN]->(sp108)
-MERGE (p108)-[:HAS_ASSESSMENT]->(a108)
-MERGE (p108)-[:HAS_ZONING]->(z108);
-
-// -----------------------------------------------------
-// Parcel 109: Vacant lot, no assessment or zoning
-// -----------------------------------------------------
-MERGE (p109:Parcel {parcelId: "012-345-109"})
-  ON CREATE SET p109.legalDescription = "Vacant Lot 9, DL 1009, Plan 9009";
-MERGE (t109:Title {titleId: "T-1009"}) ON CREATE SET t109.status = "Active";
-MERGE (o109:Owner {ownerId: "O-2014"}) ON CREATE SET o109.name = "Karen Example";
-
-MERGE (sp109:SurveyPlan {planId: "SP-4009"}) ON CREATE SET sp109.description = "Survey Plan 4009";
-
-MERGE (p109)-[:HAS_TITLE]->(t109)
-MERGE (t109)-[:OWNED_BY]->(o109)
-MERGE (p109)-[:HAS_PLAN]->(sp109);
-
-// No RRR, no assessment, no zoning for vacant lot
-
-// -----------------------------------------------------
-// Verify
-// -----------------------------------------------------
-MATCH (p:Parcel)
-RETURN p.parcelId, labels(p), p.legalDescription
-ORDER BY p.parcelId;
+/* Relationship types present */
+MATCH ()-[r]->() RETURN type(r) AS relType, count(*) AS n ORDER BY n DESC;
