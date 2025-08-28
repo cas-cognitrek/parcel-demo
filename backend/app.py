@@ -4,9 +4,14 @@ from typing import Any, Dict, List, Optional
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from neo4j import GraphDatabase, basic_auth
+from neo4j.time import Date, DateTime, Time, Duration
+try:
+    from neo4j.spatial import Point
+except Exception:
+    Point = None  # fallback ako verzija drajvera nema neo4j.spatial
 
 # ------------------------------------------------------------------------------
-# Configuration
+# Konfiguracija
 # ------------------------------------------------------------------------------
 
 NEO4J_URI = os.getenv("NEO4J_URI", "").strip()
@@ -14,24 +19,58 @@ NEO4J_USER = os.getenv("NEO4J_USER", "").strip()
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "").strip()
 
 app = Flask(__name__)
-CORS(app)  # allow all origins; tighten if needed
+CORS(app)
 
-driver = None  # will be initialized lazily
+_driver = None  # lenjo inicijalizovan Neo4j driver
 
+
+# ------------------------------------------------------------------------------
+# JSON sanitizacija (fix: "Object of type Date is not JSON serializable")
+# ------------------------------------------------------------------------------
+
+def _coerce_neo4j_value(v):
+    # Temporal
+    if isinstance(v, (Date, DateTime, Time)):
+        return v.iso_format()
+    if isinstance(v, Duration):
+        return str(v)
+
+    # Spatial
+    if Point and isinstance(v, Point):
+        out = {"srid": v.srid, "x": v.x, "y": v.y}
+        if hasattr(v, "z"):
+            out["z"] = v.z
+        return out
+
+    # Kolekcije
+    if isinstance(v, list):
+        return [_coerce_neo4j_value(x) for x in v]
+    if isinstance(v, tuple):
+        return tuple(_coerce_neo4j_value(x) for x in v)
+    if isinstance(v, dict):
+        return {k: _coerce_neo4j_value(val) for k, val in v.items()}
+
+    # primitivni tipovi / None
+    return v
+
+
+def send_json(data: Any, status: int = 200):
+    return jsonify(_coerce_neo4j_value(data)), status
+
+
+# ------------------------------------------------------------------------------
+# Neo4j pomoćne funkcije
+# ------------------------------------------------------------------------------
 
 def get_driver():
-    """Create the global Neo4j driver lazily to survive short cold starts on Render."""
-    global driver
-    if driver is None:
+    global _driver
+    if _driver is None:
         if not (NEO4J_URI and NEO4J_USER and NEO4J_PASSWORD):
-            # We keep driver None; routes will return graceful messages.
             return None
-        # neo4j+s / bolt+s supported; SSL managed by Neo4j Aura/Server
         auth = basic_auth(NEO4J_USER, NEO4J_PASSWORD)
-        app.logger.info("Initializing Neo4j driver to %s", NEO4J_URI)
+        app.logger.info("Initializing Neo4j driver -> %s", NEO4J_URI)
         _driver = GraphDatabase.driver(NEO4J_URI, auth=auth)
-        driver = _driver
-    return driver
+    return _driver
 
 
 def ping_neo4j() -> bool:
@@ -50,38 +89,37 @@ def ping_neo4j() -> bool:
 def node_to_dict(n) -> Optional[Dict[str, Any]]:
     if n is None:
         return None
-    try:
-        node_id = getattr(n, "element_id", None)
-    except Exception:
-        node_id = None
+    node_id = getattr(n, "element_id", None)
     if node_id is None and hasattr(n, "id"):
         node_id = n.id
+    props = {k: _coerce_neo4j_value(v) for k, v in dict(n).items()}
     return {
         "id": node_id,
         "labels": list(n.labels) if hasattr(n, "labels") else [],
-        "properties": dict(n),
+        "properties": props,
     }
 
 
 # ------------------------------------------------------------------------------
-# Routes
+# Rute
 # ------------------------------------------------------------------------------
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"})
+    return send_json({"status": "ok"})
 
 
 @app.route("/")
-def index():
-    return jsonify({
+def root():
+    return send_json({
         "service": "parcel-backend",
         "status": "ok",
         "neo4j_connected": ping_neo4j(),
         "try": [
             "/health",
             "/api/v1/parcels",
-            "/api/v1/parcels/012-345-106"
+            "/api/v1/parcels/012-345-106",
+            "/api/v1/graph/parcel/012-345-106"
         ],
     })
 
@@ -89,14 +127,13 @@ def index():
 @app.route("/api/v1/parcels", methods=["GET"])
 def list_parcels():
     """
-    Returns a simple list of parcel IDs (for dropdowns).
-    Optional query params:
-      - q: substring filter
-      - limit: max number (default 200)
+    Lista parcelId vrednosti za dropdown.
+      ?q=substring  (opciono)
+      ?limit=200    (opciono)
     """
     drv = get_driver()
     if not drv:
-        return jsonify({"parcels": [], "error": "neo4j_not_configured"}), 200
+        return send_json({"parcels": [], "error": "neo4j_not_configured"})
 
     q = request.args.get("q", "").strip()
     try:
@@ -127,21 +164,21 @@ def list_parcels():
                     """,
                     limit=limit
                 ).values()
-        return jsonify({"parcels": [r[0] for r in recs]})
+        return send_json({"parcels": [r[0] for r in recs]})
     except Exception as e:
         app.logger.exception("list_parcels failed")
-        return jsonify({"parcels": [], "error": "server", "message": str(e)}), 500
+        return send_json({"parcels": [], "error": "server", "message": str(e)}, 500)
 
 
 @app.route("/api/v1/parcels/<parcel_id>", methods=["GET"])
 def get_parcel(parcel_id: str):
     """
-    Returns the parcel star (Parcel + Title/Owner/Zoning/Plan/RRR/Assessment).
-    Tolerates :SurveyPlan or :Plan labels for survey plans.
+    Vraća parcelu i povezane čvorove (Title/Owner/Zoning/Assessment/Plan/RRR).
+    Dozvoljava i :SurveyPlan i :Plan labelu za planove.
     """
     drv = get_driver()
     if not drv:
-        return jsonify({"error": "neo4j_not_configured", "parcelId": parcel_id}), 200
+        return send_json({"error": "neo4j_not_configured", "parcelId": parcel_id})
 
     QUERY = """
     MATCH (p:Parcel {parcelId:$parcelId})
@@ -161,16 +198,14 @@ def get_parcel(parcel_id: str):
       collect(DISTINCT sp) AS plans,
       collect(DISTINCT r)  AS rrrs
     """
-
     try:
         with drv.session() as s:
             rec = s.run(QUERY, parcelId=parcel_id).single()
             if not rec:
-                return jsonify({"error": "not_found", "parcelId": parcel_id}), 404
+                return send_json({"error": "not_found", "parcelId": parcel_id}, 404)
 
-            p = rec["p"]
             payload = {
-                "parcel": node_to_dict(p),
+                "parcel":      node_to_dict(rec["p"]),
                 "titles":      [node_to_dict(n) for n in rec["titles"]],
                 "owners":      [node_to_dict(n) for n in rec["owners"]],
                 "zoning":      [node_to_dict(n) for n in rec["zonings"]],
@@ -178,74 +213,76 @@ def get_parcel(parcel_id: str):
                 "plans":       [node_to_dict(n) for n in rec["plans"]],
                 "rrrs":        [node_to_dict(n) for n in rec["rrrs"]],
             }
-            return jsonify(payload)
+            return send_json(payload)
     except Exception as e:
-        app.logger.exception("get_parcel failed for %s", parcel_id)
-        return jsonify({"error": "server", "message": str(e)}), 500
+        app.logger.exception("Error fetching parcel %s", parcel_id)
+        return send_json({"error": "server", "message": str(e)}, 500)
 
 
-# Optional: simple debug graph dump for a parcel (useful during setup)
-@app.route("/api/v1/parcels/<parcel_id>/graph", methods=["GET"])
-def get_parcel_graph(parcel_id: str):
+@app.route("/api/v1/graph/parcel/<parcel_id>", methods=["GET"])
+def graph_for_parcel(parcel_id: str):
     """
-    Returns all relationships around a parcel (undirected). Handy for debugging.
+    Debug podgraf oko parcele (nedirekciono).
+    Odgovor:
+      { nodes: [ {id, labels, properties}, ... ],
+        links: [ {id, type, start, end, properties}, ... ] }
     """
     drv = get_driver()
     if not drv:
-        return jsonify({"nodes": [], "rels": [], "error": "neo4j_not_configured"}), 200
+        return send_json({"nodes": [], "links": [], "error": "neo4j_not_configured"})
 
     QUERY = """
-    MATCH (p:Parcel {parcelId:$parcelId})-[r]-(m)
+    MATCH (p:Parcel {parcelId:$parcelId})
+    OPTIONAL MATCH (p)-[r]-(m)
     RETURN p, r, m
     """
     try:
         with drv.session() as s:
-            results = s.run(QUERY, parcelId=parcel_id)
+            rs = s.run(QUERY, parcelId=parcel_id)
 
-            nodes_map: Dict[str, Dict[str, Any]] = {}
-            rels: List[Dict[str, Any]] = []
+            nodes: Dict[str, Dict[str, Any]] = {}
+            links: List[Dict[str, Any]] = []
 
-            def ensure_node(n):
+            def add_node(n):
                 d = node_to_dict(n)
                 if not d:
                     return None
                 nid = str(d["id"])
-                if nid not in nodes_map:
-                    nodes_map[nid] = d
+                if nid not in nodes:
+                    nodes[nid] = d
                 return nid
 
-            for rec in results:
+            for rec in rs:
                 p = rec["p"]
-                m = rec["m"]
+                pid = add_node(p)
+
                 r = rec["r"]
+                m = rec["m"]
+                if r is not None and m is not None:
+                    mid = add_node(m)
+                    rid = getattr(r, "element_id", None)
+                    if rid is None and hasattr(r, "id"):
+                        rid = r.id
+                    links.append({
+                        "id": str(rid),
+                        "type": r.type,
+                        "start": pid,
+                        "end": mid,
+                        "properties": _coerce_neo4j_value(dict(r)),
+                    })
 
-                src = ensure_node(p)
-                dst = ensure_node(m)
-                r_id = getattr(r, "element_id", None)
-                if r_id is None and hasattr(r, "id"):
-                    r_id = r.id
-                rels.append({
-                    "id": str(r_id),
-                    "type": r.type,
-                    "start": src,
-                    "end": dst,
-                    "properties": dict(r),
-                })
-
-            return jsonify({
-                "nodes": list(nodes_map.values()),
-                "rels": rels
+            return send_json({
+                "nodes": list(nodes.values()),
+                "links": links
             })
     except Exception as e:
-        app.logger.exception("get_parcel_graph failed for %s", parcel_id)
-        return jsonify({"error": "server", "message": str(e)}), 500
+        app.logger.exception("graph_for_parcel error")
+        return send_json({"error": "server", "message": str(e)}, 500)
 
 
 # ------------------------------------------------------------------------------
-# Local dev entrypoint
+# Lokalni razvoj
 # ------------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Local dev server (Render will use gunicorn)
-    port = int(os.getenv("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
