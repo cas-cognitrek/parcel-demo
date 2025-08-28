@@ -169,7 +169,7 @@
   async function boot() {
     if (USING_API) {
       await loadParcelsFromAPI();
-      await loadGeojsonLocal(); // we still draw local polygons unless you later serve them via API
+      await loadGeojsonLocal(); // still draw local polygons unless later served by API
     } else {
       await loadParcelsFromLocalViews();
       await loadGeojsonLocal();
@@ -335,6 +335,8 @@
         { selector: 'edge', style: { 'width': 2, 'line-color': '#b8b8b8', 'target-arrow-shape': 'triangle', 'target-arrow-color': '#b8b8b8', 'curve-style': 'bezier', 'label': 'data(type)', 'font-size': 8 } }
       ]
     });
+    // Expose globally so other scripts/patches can access the instance
+    window.cy = cy;
     return cy;
   }
 
