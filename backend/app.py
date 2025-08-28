@@ -6,12 +6,13 @@ from flask_cors import CORS
 from neo4j import GraphDatabase, basic_auth
 from neo4j.time import Date, DateTime, Time, Duration
 try:
+    # neo4j >=5.x
     from neo4j.spatial import Point
 except Exception:
-    Point = None  # fallback ako verzija drajvera nema neo4j.spatial
+    Point = None  # fallback if the driver variant doesn't expose spatial
 
 # ------------------------------------------------------------------------------
-# Konfiguracija
+# Configuration
 # ------------------------------------------------------------------------------
 
 NEO4J_URI = os.getenv("NEO4J_URI", "").strip()
@@ -21,11 +22,11 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "").strip()
 app = Flask(__name__)
 CORS(app)
 
-_driver = None  # lenjo inicijalizovan Neo4j driver
+_driver = None  # lazy-initialized Neo4j driver
 
 
 # ------------------------------------------------------------------------------
-# JSON sanitizacija (fix: "Object of type Date is not JSON serializable")
+# JSON coercion (fix: TypeError: Object of type Date is not JSON serializable)
 # ------------------------------------------------------------------------------
 
 def _coerce_neo4j_value(v):
@@ -42,7 +43,7 @@ def _coerce_neo4j_value(v):
             out["z"] = v.z
         return out
 
-    # Kolekcije
+    # Collections / nested
     if isinstance(v, list):
         return [_coerce_neo4j_value(x) for x in v]
     if isinstance(v, tuple):
@@ -50,7 +51,6 @@ def _coerce_neo4j_value(v):
     if isinstance(v, dict):
         return {k: _coerce_neo4j_value(val) for k, val in v.items()}
 
-    # primitivni tipovi / None
     return v
 
 
@@ -59,7 +59,7 @@ def send_json(data: Any, status: int = 200):
 
 
 # ------------------------------------------------------------------------------
-# Neo4j pomoćne funkcije
+# Neo4j helpers
 # ------------------------------------------------------------------------------
 
 def get_driver():
@@ -90,7 +90,7 @@ def node_to_dict(n) -> Optional[Dict[str, Any]]:
     if n is None:
         return None
     node_id = getattr(n, "element_id", None)
-    if node_id is None and hasattr(n, "id"):
+    if node_id is None and hasattr(n, "id"):  # old api fallback
         node_id = n.id
     props = {k: _coerce_neo4j_value(v) for k, v in dict(n).items()}
     return {
@@ -101,7 +101,7 @@ def node_to_dict(n) -> Optional[Dict[str, Any]]:
 
 
 # ------------------------------------------------------------------------------
-# Rute
+# Routes
 # ------------------------------------------------------------------------------
 
 @app.route("/health")
@@ -127,9 +127,9 @@ def root():
 @app.route("/api/v1/parcels", methods=["GET"])
 def list_parcels():
     """
-    Lista parcelId vrednosti za dropdown.
-      ?q=substring  (opciono)
-      ?limit=200    (opciono)
+    Lists parcelId values for the dropdown.
+      ?q=substring  (optional)
+      ?limit=200    (optional)
     """
     drv = get_driver()
     if not drv:
@@ -173,8 +173,8 @@ def list_parcels():
 @app.route("/api/v1/parcels/<parcel_id>", methods=["GET"])
 def get_parcel(parcel_id: str):
     """
-    Vraća parcelu i povezane čvorove (Title/Owner/Zoning/Assessment/Plan/RRR).
-    Dozvoljava i :SurveyPlan i :Plan labelu za planove.
+    Returns a parcel and its related nodes (Title/Owner/Zoning/Assessment/Plan/RRR).
+    Accepts either :SurveyPlan or :Plan labels for plans.
     """
     drv = get_driver()
     if not drv:
@@ -222,10 +222,9 @@ def get_parcel(parcel_id: str):
 @app.route("/api/v1/graph/parcel/<parcel_id>", methods=["GET"])
 def graph_for_parcel(parcel_id: str):
     """
-    Debug podgraf oko parcele (nedirekciono).
-    Odgovor:
-      { nodes: [ {id, labels, properties}, ... ],
-        links: [ {id, type, start, end, properties}, ... ] }
+    Neighborhood graph around a parcel.
+    Returns both 'source/target' and 'start/end' so various FE libs can render.
+    Adds 'title' and 'kind' to nodes for nicer display/coloring.
     """
     drv = get_driver()
     if not drv:
@@ -236,11 +235,20 @@ def graph_for_parcel(parcel_id: str):
     OPTIONAL MATCH (p)-[r]-(m)
     RETURN p, r, m
     """
+
+    def friendly_title(d: Dict[str, Any]) -> str:
+        labels = d.get("labels", [])
+        props  = d.get("properties", {})
+        for key in ("parcelId", "name", "titleId", "zoningId", "assessmentId", "planId", "id"):
+            if key in props and props[key]:
+                return f"{labels[0] if labels else ''} {props[key]}"
+        return labels[0] if labels else "Node"
+
     try:
         with drv.session() as s:
             rs = s.run(QUERY, parcelId=parcel_id)
 
-            nodes: Dict[str, Dict[str, Any]] = {}
+            nodes_by_id: Dict[str, Dict[str, Any]] = {}
             links: List[Dict[str, Any]] = []
 
             def add_node(n):
@@ -248,8 +256,10 @@ def graph_for_parcel(parcel_id: str):
                 if not d:
                     return None
                 nid = str(d["id"])
-                if nid not in nodes:
-                    nodes[nid] = d
+                if nid not in nodes_by_id:
+                    d["title"] = friendly_title(d)
+                    d["kind"] = d["labels"][0] if d["labels"] else "Node"
+                    nodes_by_id[nid] = d
                 return nid
 
             for rec in rs:
@@ -260,28 +270,24 @@ def graph_for_parcel(parcel_id: str):
                 m = rec["m"]
                 if r is not None and m is not None:
                     mid = add_node(m)
-                    rid = getattr(r, "element_id", None)
-                    if rid is None and hasattr(r, "id"):
-                        rid = r.id
+                    rid = getattr(r, "element_id", None) or getattr(r, "id", None)
                     links.append({
                         "id": str(rid),
                         "type": r.type,
-                        "start": pid,
-                        "end": mid,
+                        # support both link conventions
+                        "source": pid, "target": mid,
+                        "start":  pid, "end":    mid,
                         "properties": _coerce_neo4j_value(dict(r)),
                     })
 
-            return send_json({
-                "nodes": list(nodes.values()),
-                "links": links
-            })
+            return send_json({"nodes": list(nodes_by_id.values()), "links": links})
     except Exception as e:
         app.logger.exception("graph_for_parcel error")
         return send_json({"error": "server", "message": str(e)}, 500)
 
 
 # ------------------------------------------------------------------------------
-# Lokalni razvoj
+# Local dev entrypoint
 # ------------------------------------------------------------------------------
 
 if __name__ == "__main__":
