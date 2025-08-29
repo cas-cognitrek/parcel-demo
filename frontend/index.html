@@ -9,406 +9,166 @@
   <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <!-- Cytoscape + layouts -->
+  <!-- Cytoscape -->
   <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
-  <script src="https://unpkg.com/cytoscape-cose-bilkent@4.1.0/cytoscape-cose-bilkent.js"></script>
 
-  <!-- Optional config.js (defines window.API_BASE). Safe if missing. -->
   <script>
-    window.API_BASE = window.API_BASE || "";  /* empty => Local JSON mode */
+    window.API_BASE = window.API_BASE || "";  // set in config.js if backend is live
   </script>
 
   <style>
-    :root{
-      --panel-w: 420px;
-      --border: #cfd6df;
-    }
-    *{ box-sizing: border-box; }
-    body{
-      margin:0;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
-      color:#182230;
-    }
-
-    /* --- App grid -------------------------------------------------------- */
-    .app{
-      display:grid;
-      grid-template-columns: minmax(0,1fr) var(--panel-w) !important; /* lock layout */
-      grid-template-rows: 60vh 1fr;
-      min-height: 100vh;
-    }
-    .mapwrap{ grid-column: 1 / 2 !important; grid-row: 1 / 2; position:relative; }
+    :root{ --panel-w:420px; --border:#cfd6df; }
+    *{ box-sizing:border-box; }
+    body{ margin:0; font-family:system-ui,sans-serif; color:#182230; }
+    .app{ display:grid;
+          grid-template-columns:minmax(0,1fr) var(--panel-w);
+          grid-template-rows:60vh 1fr; min-height:100vh; }
+    .mapwrap{ grid-column:1; grid-row:1; position:relative; }
     #map{ position:absolute; inset:0; }
-    .graphwrap{ grid-column: 1 / 2; grid-row: 2 / 3; border-top:1px solid var(--border); }
-    #graph{ width:100%; height:100%; min-height: 24vh; }
-    .panel{
-      grid-column: 2 / 3 !important;
-      grid-row: 1 / span 2 !important;
-      border-left:1px solid var(--border);
-      overflow:auto;
-      padding:16px 16px 24px 16px;
-      background:#fff;
-    }
-
-    /* --- Small toolbar over map ----------------------------------------- */
-    .toolbar{
-      position:absolute; top:10px; left:10px; z-index:500;
-      display:flex; gap:8px; align-items:center;
-      background:#fff; border:1px solid var(--border); border-radius:8px; padding:6px 8px;
-      box-shadow:0 2px 10px rgba(0,0,0,.08);
-    }
-    .toolbar label{ font-size:12px; color:#506173; margin-right:6px; }
-    select, button {
-      font: inherit;
-      border:1px solid var(--border);
-      background:#fff;
-      border-radius:6px; padding:6px 8px;
-    }
-    button.toggle{
-      font-size:12px; color:#34495e; background:#f7fafc;
-    }
-
-    /* --- Panel content --------------------------------------------------- */
-    .panel h2{ font-size:18px; margin:0 0 8px 0; }
+    .graphwrap{ grid-column:1; grid-row:2; border-top:1px solid var(--border);}
+    #graph{ width:100%; height:100%; min-height:24vh; }
+    .panel{ grid-column:2; grid-row:1/span 2;
+            border-left:1px solid var(--border); overflow:auto;
+            padding:16px; background:#fff; }
+    .toolbar{ position:absolute; top:10px; left:10px; z-index:500;
+              display:flex; gap:8px; align-items:center;
+              background:#fff; border:1px solid var(--border);
+              border-radius:8px; padding:6px 8px; }
+    .toolbar label{ font-size:12px; color:#506173; }
+    select,button{ font:inherit; border:1px solid var(--border);
+                   border-radius:6px; padding:6px 8px; }
+    .panel h2{ margin:0 0 8px; font-size:18px; }
     .muted{ color:#6b7a90; font-size:12px; }
     .row{ padding:10px 0; border-bottom:1px solid var(--border); }
     .row .lbl{ font-weight:600; margin-bottom:6px; }
     .empty{ color:#9aa6b2; }
-
-    /* Graph legend */
     .legend{ display:flex; gap:12px; flex-wrap:wrap; font-size:12px; margin-top:8px;}
-    .dot{ display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+    .dot{ width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:6px; }
   </style>
 </head>
 <body>
 
-  <div class="app">
-    <!-- Map (top-left) -->
-    <div class="mapwrap">
-      <div class="toolbar">
-        <label for="parcelSelect">Jump to parcel:</label>
-        <select id="parcelSelect"><option value="">— choose —</option></select>
-        <button id="modeBtn" class="toggle">Mode: <span id="modeLabel">Local JSON</span></button>
-      </div>
-      <div id="map"></div>
+<div class="app">
+  <div class="mapwrap">
+    <div class="toolbar">
+      <label for="parcelSelect">Jump:</label>
+      <select id="parcelSelect"><option value="">— choose —</option></select>
+      <span id="modeLabel" class="muted"></span>
     </div>
-
-    <!-- Graph (bottom-left) -->
-    <div class="graphwrap">
-      <div id="graph"></div>
-    </div>
-
-    <!-- Parcel panel (right, full height) -->
-    <aside class="panel">
-      <h2>Parcel</h2>
-      <div class="muted" id="sourceLine">Source: <span id="sourceVal">—</span></div>
-
-      <div class="row">
-        <div class="lbl">Parcel:</div>
-        <div id="p-id" class="empty">—</div>
-      </div>
-
-      <div class="row">
-        <div class="lbl">Legal:</div>
-        <div id="p-legal" class="empty">(no details)</div>
-      </div>
-
-      <div class="row">
-        <div class="lbl">Title</div>
-        <div id="p-title" class="empty">—</div>
-      </div>
-
-      <div class="row">
-        <div class="lbl">Owner(s)</div>
-        <div id="p-owners" class="empty">—</div>
-      </div>
-
-      <div class="row">
-        <div class="lbl">RRR</div>
-        <div id="p-rrr" class="empty">—</div>
-      </div>
-
-      <div class="row">
-        <div class="lbl">Zoning</div>
-        <div id="p-zoning" class="empty">—</div>
-      </div>
-
-      <div class="row">
-        <div class="lbl">Survey Plan</div>
-        <div id="p-plan" class="empty">—</div>
-      </div>
-
-      <div class="row">
-        <div class="lbl">Assessment</div>
-        <div id="p-assess" class="empty">—</div>
-      </div>
-
-      <div class="row">
-        <div class="lbl">Graph Legend</div>
-        <div class="legend">
-          <span><span class="dot" style="background:#e74c3c"></span>Parcel</span>
-          <span><span class="dot" style="background:#58c4dc"></span>Plan</span>
-          <span><span class="dot" style="background:#f6c14b"></span>Zoning</span>
-          <span><span class="dot" style="background:#2ecc71"></span>Title</span>
-          <span><span class="dot" style="background:#8e7cf3"></span>Owner</span>
-          <span><span class="dot" style="background:#f39c12"></span>RRR</span>
-          <span><span class="dot" style="background:#3498db"></span>Assessment</span>
-        </div>
-      </div>
-    </aside>
+    <div id="map"></div>
   </div>
 
-  <script>
-    // ------------------ helpers ------------------
-    function getParcelIdFromProps(p) {
-      const candidates = [
-        'parcelid','PARCELID','parcel_id','PARCEL_ID','ParcelId',
-        'pid','PID','parcel','PARCEL','id','ID'
-      ];
-      for (const k of candidates) {
-        if (p && p[k] != null && String(p[k]).trim() !== '') {
-          return String(p[k]).trim();
-        }
-      }
-      if (p) {
-        for (const [k, v] of Object.entries(p)) {
-          if (/parcel.*id|pid/i.test(k) && v != null && String(v).trim() !== '') {
-            return String(v).trim();
-          }
-        }
-      }
-      return null;
-    }
+  <div class="graphwrap"><div id="graph"></div></div>
 
-    const GEOJSON_URL = './synthetic_parcels.geojson'; // local GeoJSON
-    const USING_API = (window.API_BASE && window.API_BASE.trim() !== '');
-    document.getElementById('modeLabel').textContent = USING_API ? 'Live API' : 'Local JSON';
-    document.getElementById('sourceVal').textContent = USING_API ? window.API_BASE : 'local files';
+  <aside class="panel">
+    <h2>Parcel</h2>
+    <div class="muted">Source: <span id="sourceVal">—</span></div>
 
-    // Colour palette for graph nodes
-    const COLORS = {
-      Parcel: '#e74c3c',
-      Title: '#2ecc71',
-      Owner: '#8e7cf3',
-      RRR: '#f39c12',
-      Zoning: '#f6c14b',
-      Plan: '#58c4dc',
-      Assessment: '#3498db',
-      Default: '#95a5a6'
-    };
+    <div class="row"><div class="lbl">Parcel:</div><div id="p-id">—</div></div>
+    <div class="row"><div class="lbl">Legal:</div><div id="p-legal">(no details)</div></div>
+    <div class="row"><div class="lbl">Title:</div><div id="p-title">—</div></div>
+    <div class="row"><div class="lbl">Owners:</div><div id="p-owners">—</div></div>
+    <div class="row"><div class="lbl">RRR:</div><div id="p-rrr">—</div></div>
+    <div class="row"><div class="lbl">Zoning:</div><div id="p-zoning">—</div></div>
+    <div class="row"><div class="lbl">Survey Plan:</div><div id="p-plan">—</div></div>
+    <div class="row"><div class="lbl">Assessment:</div><div id="p-assess">—</div></div>
 
-    // ------------------ map ------------------
-    const map = L.map('map', {
-      center: [49.246, -123.116], // Vancouver
-      zoom: 12
-    });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19, attribution: '&copy; OpenStreetMap'
-    }).addTo(map);
+    <div class="row">
+      <div class="lbl">Graph Legend</div>
+      <div class="legend">
+        <span><span class="dot" style="background:#e74c3c"></span>Parcel</span>
+        <span><span class="dot" style="background:#2ecc71"></span>Title</span>
+        <span><span class="dot" style="background:#8e7cf3"></span>Owner</span>
+        <span><span class="dot" style="background:#f39c12"></span>RRR</span>
+        <span><span class="dot" style="background:#f6c14b"></span>Zoning</span>
+        <span><span class="dot" style="background:#58c4dc"></span>Plan</span>
+        <span><span class="dot" style="background:#3498db"></span>Assessment</span>
+      </div>
+    </div>
+  </aside>
+</div>
 
-    let parcelLayer;              // GeoJSON layer
-    let featureIndex = {};        // id -> feature layer
-    let currentId = null;
+<script>
+const GEOJSON_URL = './synthetic_parcels.geojson';
+const USING_API = (window.API_BASE && window.API_BASE.trim() !== '');
+document.getElementById('modeLabel').textContent = USING_API ? 'Live API' : 'Local JSON';
+document.getElementById('sourceVal').textContent = USING_API ? window.API_BASE : 'local files';
 
-    function styleParcel() {
-      return { color:'#2a78ff', weight:1.2, fillColor:'#3987ff', fillOpacity:0.15 };
-    }
-    function styleSelected() {
-      return { color:'#ff3b30', weight:2, fillColor:'#ff6b5a', fillOpacity:0.25 };
-    }
+const COLORS = {
+  Parcel:'#e74c3c', Title:'#2ecc71', Owner:'#8e7cf3',
+  RRR:'#f39c12', Zoning:'#f6c14b', Plan:'#58c4dc',
+  Assessment:'#3498db', Default:'#95a5a6'
+};
 
-    function renderDropdown() {
-      const sel = document.getElementById('parcelSelect');
-      sel.innerHTML = '<option value="">— choose —</option>';
-      const ids = Object.keys(featureIndex).sort();
-      for (const id of ids) {
-        const opt = document.createElement('option');
-        opt.value = id; opt.textContent = id;
-        sel.appendChild(opt);
-      }
-      sel.addEventListener('change', (e) => {
-        if (e.target.value) selectParcel(e.target.value, { center: true });
-      });
-    }
+// map
+const map = L.map('map').setView([49.246,-123.116],12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+let featureIndex={}, currentId=null;
 
-    function selectParcel(id, opts={}) {
-      if (!id || !featureIndex[id]) return;
+function styleParcel(){ return {color:'#2a78ff',weight:1.2,fillColor:'#3987ff',fillOpacity:0.15}; }
+function styleSelected(){ return {color:'#ff3b30',weight:2,fillColor:'#ff6b5a',fillOpacity:0.25}; }
 
-      // restyle previous
-      if (currentId && featureIndex[currentId]) {
-        featureIndex[currentId].setStyle(styleParcel());
-      }
-      currentId = id;
-      const layer = featureIndex[id];
-      layer.setStyle(styleSelected());
+function selectParcel(id){
+  if(!id||!featureIndex[id])return;
+  if(currentId&&featureIndex[currentId]) featureIndex[currentId].setStyle(styleParcel());
+  currentId=id;
+  featureIndex[id].setStyle(styleSelected());
+  map.panTo(featureIndex[id].getBounds().getCenter());
+  loadDetails(id);
+}
 
-      // do NOT change zoom; only pan towards it a bit
-      const b = layer.getBounds();
-      const center = b.getCenter();
-      map.panTo(center, { animate:true });
+fetch(GEOJSON_URL).then(r=>r.json()).then(geo=>{
+  L.geoJSON(geo,{style:styleParcel,onEachFeature:(f,lyr)=>{
+    const id=f.properties?.parcelid||f.properties?.parcelId||f.properties?.id;
+    featureIndex[id]=lyr;
+    lyr.bindTooltip(id); lyr.on('click',()=>selectParcel(id));
+  }}).addTo(map);
+  const sel=document.getElementById('parcelSelect');
+  Object.keys(featureIndex).sort().forEach(id=>{
+    const o=document.createElement('option'); o.value=id;o.textContent=id; sel.appendChild(o);
+  });
+  sel.onchange=e=>selectParcel(e.target.value);
+});
 
-      // panel update
-      setPanelLoading(id);
-      if (USING_API) {
-        updatePanelFromAPI(id);
-        renderGraphFromAPI(id);
-      } else {
-        updatePanelLocalOnly(id);
-        clearGraph();
-      }
-    }
+// panel
+function setText(id,text){document.getElementById(id).textContent=text||'—';}
 
-    function setPanelLoading(id){
-      setText('p-id', id || '—');
-      setText('p-legal', '(no details)');
-      setText('p-title', '—', true);
-      setText('p-owners', '—', true);
-      setText('p-rrr', '—', true);
-      setText('p-zoning', '—', true);
-      setText('p-plan', '—', true);
-      setText('p-assess', '—', true);
-    }
+function loadDetails(id){
+  if(USING_API){
+    fetch(`${API_BASE}/api/v1/parcels/${encodeURIComponent(id)}`)
+      .then(r=>r.json()).then(d=>{
+        setText('p-id', d.parcelId);
+        setText('p-legal', d.parcel?.properties?.legaldescription);
+        setText('p-title', d.title?.properties?.id||d.title?.properties?.name);
+        setText('p-owners', (d.owners||[]).map(o=>o.properties?.name).join(', '));
+        setText('p-rrr', (d.rrrs||[]).map(r=>r.properties?.type).join(', '));
+        setText('p-zoning', (d.zonings||[]).map(z=>z.properties?.code).join(', '));
+        setText('p-plan', d.surveyPlan?.properties?.name||d.surveyPlan?.properties?.id);
+        setText('p-assess', d.assessment?.properties?.year||d.assessment?.properties?.id);
+      }).catch(()=>{setText('p-id',id);});
+    renderGraph(id);
+  }else{
+    setText('p-id',id);
+  }
+}
 
-    function setText(id, text, empty=false){
-      const el = document.getElementById(id);
-      el.textContent = text;
-      el.classList.toggle('empty', empty || text === '—');
-    }
+// graph
+let cy=cytoscape({container:document.getElementById('graph'),elements:[],style:[
+ {selector:'node',style:{'background-color':ele=>COLORS[ele.data('label')]||COLORS.Default,
+                         'label':'data(id)','font-size':10,'color':'#111'}},
+ {selector:'edge',style:{'line-color':'#aaa','target-arrow-shape':'triangle','target-arrow-color':'#aaa',
+                         'curve-style':'bezier','label':'data(type)','font-size':9}}]});
 
-    // ------------------ load parcels ------------------
-    fetch(GEOJSON_URL)
-      .then(r => r.json())
-      .then(geo => {
-        featureIndex = {};
-        parcelLayer = L.geoJSON(geo, {
-          style: styleParcel,
-          onEachFeature: (f, lyr) => {
-            const id = getParcelIdFromProps(f.properties) || 'unknown';
-            featureIndex[id] = lyr;
-            lyr.on('click', () => selectParcel(id));
-            lyr.bindTooltip(id, { sticky:true });
-          }
-        }).addTo(map);
-
-        try{ map.fitBounds(parcelLayer.getBounds(), { padding:[20,20] }); } catch(e){}
-
-        renderDropdown();
-      })
-      .catch(err => {
-        console.error('Failed to load GeoJSON', err);
-        alert('Could not load synthetic_parcels.geojson');
-      });
-
-    // ------------------ panel + graph (API) ------------------
-    function updatePanelFromAPI(id){
-      fetch(`${window.API_BASE.replace(/\/$/,'')}/api/v1/parcels/${encodeURIComponent(id)}`)
-        .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
-        .then(data => {
-          // Defensive reads (data shape may vary)
-          setText('p-id', data?.parcel?.properties?.parcelid || id);
-          setText('p-legal', data?.parcel?.properties?.legaldescription || '(no details)');
-          setText('p-title', (data?.titles?.[0]?.id || '—'), !(data?.titles?.length));
-          setText('p-owners', (data?.owners?.map(o=>o.name).join(', ') || '—'), !(data?.owners?.length));
-          setText('p-rrr', (data?.rrrs?.map(r=>r.type).join(', ') || '—'), !(data?.rrrs?.length));
-          setText('p-zoning', (data?.zonings?.map(z=>z.code).join(', ') || '—'), !(data?.zonings?.length));
-          setText('p-plan', (data?.plans?.map(p=>p.name||p.id).join(', ') || '—'), !(data?.plans?.length));
-          setText('p-assess', (data?.assessments?.map(a=>a.id||a.year).join(', ') || '—'), !(data?.assessments?.length));
-        })
-        .catch(err => {
-          console.warn('Parcel fetch failed, showing id only', err);
-          updatePanelLocalOnly(id);
-        });
-    }
-
-    function updatePanelLocalOnly(id){
-      setText('p-id', id);
-      setText('p-legal', '(no details)');
-      setText('p-title', '—', true);
-      setText('p-owners', '—', true);
-      setText('p-rrr', '—', true);
-      setText('p-zoning', '—', true);
-      setText('p-plan', '—', true);
-      setText('p-assess', '—', true);
-    }
-
-    // ------------------ graph ------------------
-    let cy;
-    function initCy(){
-      if (cy) return cy;
-      cytoscape.use(window.cytoscapeCoseBilkent);
-      cy = cytoscape({
-        container: document.getElementById('graph'),
-        elements: [],
-        style: [
-          { selector:'node',
-            style:{
-              'background-color': ele => COLORS[ele.data('type')] || COLORS.Default,
-              'label': 'data(label)',
-              'font-size':'12px',
-              'color':'#2b3a46',
-              'text-outline-color':'#fff',
-              'text-outline-width':2
-            }},
-          { selector:'edge',
-            style:{
-              'width':1.5,
-              'line-color':'#b9c4cf',
-              'target-arrow-shape':'triangle',
-              'target-arrow-color':'#b9c4cf',
-              'curve-style':'bezier',
-              'label':'data(label)',
-              'font-size':'10px',
-              'text-rotation':'autorotate',
-              'text-margin-y': -6,
-              'color':'#90a4b7',
-              'text-outline-color':'#fff',
-              'text-outline-width':2
-            }}
-        ]
-      });
-      return cy;
-    }
-
-    function clearGraph(){
-      const cy = initCy();
+function renderGraph(id){
+  fetch(`${API_BASE}/api/v1/graph/parcel/${encodeURIComponent(id)}`)
+    .then(r=>r.json()).then(g=>{
       cy.elements().remove();
-    }
-
-    function renderGraphFromAPI(id){
-      fetch(`${window.API_BASE.replace(/\/$/,'')}/api/v1/graph/parcel/${encodeURIComponent(id)}`)
-        .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
-        .then(g => {
-          const cy = initCy();
-          cy.elements().remove();
-
-          // Expected shape: { nodes:[{id,label,type}], links:[{source,target,label}] }
-          const nodes = (g.nodes || []).map(n => ({
-            data:{ id:String(n.id), label:n.label || n.id, type:n.type || 'Default' }
-          }));
-          const edges = (g.links || g.rels || []).map(e => ({
-            data:{ id:`${e.source}->${e.target}:${e.label||''}`,
-                   source:String(e.source), target:String(e.target),
-                   label: e.label || '' }
-          }));
-
-          cy.add([...nodes, ...edges]);
-          cy.layout({ name:'cose-bilkent', animate:false, nodeRepulsion: 4500, idealEdgeLength: 90 }).run();
-          cy.fit(undefined, 30);
-        })
-        .catch(err => {
-          console.warn('Graph fetch failed:', err);
-          clearGraph();
-        });
-    }
-
-    // ------------- mode toggle (optional) -------------
-    document.getElementById('modeBtn').addEventListener('click', () => {
-      if (USING_API) {
-        alert('Live API mode is coming from config.js (window.API_BASE). To switch to Local JSON, clear API_BASE in config.js and redeploy.');
-      } else {
-        alert('Currently in Local JSON mode. To use Live API, set window.API_BASE in config.js to your backend URL and redeploy.');
-      }
+      const nodes=(g.nodes||[]).map(n=>({data:{id:n.id,label:n.label||'Default'}}));
+      const edges=(g.links||[]).map(e=>({data:{id:`${e.source}->${e.target}`,source:e.source,target:e.target,type:e.type}}));
+      cy.add(nodes); cy.add(edges);
+      cy.layout({name:'cose',animate:false}).run(); cy.fit();
     });
-  </script>
+}
+</script>
 </body>
 </html>
