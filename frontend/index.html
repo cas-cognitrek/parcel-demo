@@ -18,499 +18,398 @@
     crossorigin=""
   ></script>
 
-  <!-- Cytoscape for the graph -->
-  <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+  <!-- Cytoscape for graph -->
+  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
 
-  <!-- (Optional) config.js can define window.API_BASE -->
-  <script>
-    // If config.js isn’t present, prevent a 404 in console
-    (function tryLoadConfig(){
-      const s=document.createElement('script');
-      s.src='config.js';
-      s.defer=true;
-      s.onerror=()=>console.info('config.js not found (that is fine for Local JSON)');
-      document.head.appendChild(s);
-    })();
-  </script>
+  <!-- Config: defines window.API_BASE -->
+  <script src="./config.js"></script>
 
   <style>
     :root{
-      --panel-w: 420px;
-      --divider: #d8dce3;
-      --ui: #f7f8fb;
-      --ink: #1f2937;
+      --border:#d1d5db;
+      --panel-bg:#fff;
+      --text:#111827;
       --muted:#6b7280;
       --accent:#2563eb;
     }
-    html, body { height:100%; margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color:var(--ink); }
-    #app { position:fixed; inset:0; display:grid; grid-template-columns: 1fr var(--panel-w); background:#fff; }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;
+      color:var(--text); background:#f9fafb;
+    }
 
-    /* Left column splits vertically: map (top) + graph (bottom) */
-    .left { position:relative; border-right:1px solid var(--divider); display:grid; grid-template-rows: 1fr 310px; }
-    .toolbar {
-      position:absolute; top:10px; left:10px; z-index:1000;
-      background:#fff; border:1px solid var(--divider); box-shadow:0 6px 18px rgba(0,0,0,.08);
-      padding:10px; border-radius:10px; display:flex; gap:10px; align-items:center;
+    /* Layout: top controls + 3 panes */
+    .topbar{
+      position:fixed; z-index:1000; top:8px; left:8px; display:flex; gap:10px; align-items:center;
+      background:#fff; border:1px solid var(--border); border-radius:8px; padding:6px 10px;
+      box-shadow:0 2px 8px rgba(0,0,0,.06);
     }
-    .toolbar label { font-size:14px; color:#374151; margin-right:4px; }
-    select, button {
-      border:1px solid var(--divider); border-radius:8px; padding:8px 10px; background:#fff;
-      font-size:14px; color:#111827;
+    .select{
+      padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:#fff;
     }
-    .mode { background:#eef2ff; color:#1f3fd1; border-color:#c7d2fe; }
+    .badge{
+      padding:6px 10px; border:1px solid var(--border); border-radius:999px; background:#f3f4f6;
+      font-size:12px; color:#374151; cursor:pointer; user-select:none;
+    }
 
-    #map { width:100%; height:100%; }
-    #graph { width:100%; height:100%; border-top:1px solid var(--divider); background:#fff; }
-
-    /* Right side parcel panel */
-    .panel {
-      display:flex; flex-direction:column; height:100%; background:#fff;
+    .wrap{
+      display:grid;
+      grid-template-columns: 1fr 380px;     /* map/graph | parcel panel */
+      grid-template-rows: 58vh 1fr;         /* map row | graph row */
+      gap:0;
+      height:100vh;
     }
-    .panel-head {
-      padding:16px 18px; font-weight:700; border-bottom:1px solid var(--divider);
+    #map{
+      grid-column:1; grid-row:1;
+      border-right:2px solid var(--border);
+      border-bottom:2px solid var(--border);
     }
-    .panel-body { overflow:auto; padding:16px 18px; }
-    .section { border-bottom:1px solid var(--divider); padding:12px 0; }
-    .section:last-child{ border-bottom:0; }
-    .label { font-weight:600; margin-bottom:6px; }
-    .value { color:var(--ink); }
-    .muted { color:var(--muted); }
+    #graph{
+      grid-column:1; grid-row:2;
+      border-right:2px solid var(--border);
+    }
+    .panel{
+      grid-column:2; grid-row:1 / span 2;
+      background:var(--panel-bg);
+      border-left:2px solid var(--border);
+      padding:14px 16px 24px 16px;
+      overflow:auto;
+    }
+    .h6{ margin:0 0 10px 0; font-weight:700; font-size:18px; }
+    .kv{ margin:12px 0; }
+    .k{ font-weight:600; }
+    .muted{ color:var(--muted); }
 
     /* Legend */
-    .legend { display:flex; gap:16px; align-items:center; flex-wrap:wrap; padding-top:10px; }
-    .dot { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:6px; vertical-align:middle; }
+    .legend{ display:flex; gap:14px; flex-wrap:wrap; margin-top:12px; font-size:12px;}
+    .dot{ display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:6px; vertical-align:middle;}
 
-    /* Split line between map and graph (already a border on #graph) */
+    /* Leaflet popup width fix on large screens */
+    .leaflet-popup-content{ min-width:280px; }
+
   </style>
 </head>
 <body>
-<div id="app">
-  <!-- LEFT: Map + Graph -->
-  <div class="left">
-    <!-- Toolbar -->
-    <div class="toolbar">
-      <label for="parcel-select">Jump to parcel:</label>
-      <select id="parcel-select">
-        <option value="">— choose —</option>
-      </select>
-      <button id="modeBtn" class="mode" title="Toggle between Local JSON and Live API">Mode: …</button>
-    </div>
 
-    <!-- Map -->
+  <div class="topbar">
+    <div>Jump to parcel:</div>
+    <select id="jump" class="select">
+      <option value="">— choose —</option>
+    </select>
+    <div id="modeBadge" class="badge" title="Toggle between Local JSON and Live API"></div>
+  </div>
+
+  <div class="wrap">
     <div id="map"></div>
-
-    <!-- Graph -->
     <div id="graph"></div>
+
+    <aside class="panel">
+      <div class="h6">Parcel</div>
+      <div class="kv"><span class="muted">Source: </span><span id="panel-source">—</span></div>
+      <div class="kv"><div class="k">Parcel:</div><div id="panel-parcel">—</div></div>
+      <div class="kv"><div class="k">Legal:</div><div id="panel-legal" class="muted">(no details)</div></div>
+
+      <div class="kv"><div class="k">Title</div><div id="panel-title">—</div></div>
+      <div class="kv"><div class="k">Owner(s)</div><div id="panel-owners">—</div></div>
+      <div class="kv"><div class="k">RRR</div><div id="panel-rrr">—</div></div>
+      <div class="kv"><div class="k">Zoning</div><div id="panel-zoning">—</div></div>
+      <div class="kv"><div class="k">Survey Plan</div><div id="panel-plan">—</div></div>
+      <div class="kv"><div class="k">Assessment</div><div id="panel-assess">—</div></div>
+
+      <div class="legend">
+        <span><span class="dot" style="background:#ef4444"></span>Parcel</span>
+        <span><span class="dot" style="background:#60a5fa"></span>Plan</span>
+        <span><span class="dot" style="background:#f59e0b"></span>Zoning</span>
+        <span><span class="dot" style="background:#10b981"></span>Title</span>
+        <span><span class="dot" style="background:#8b5cf6"></span>Owner</span>
+        <span><span class="dot" style="background:#f97316"></span>RRR</span>
+        <span><span class="dot" style="background:#3b82f6"></span>Assessment</span>
+      </div>
+    </aside>
   </div>
 
-  <!-- RIGHT: Parcel info -->
-  <div class="panel">
-    <div class="panel-head">Parcel</div>
-    <div class="panel-body" id="parcel-panel">
-      <div class="muted" id="sourceLabel">Source: —</div>
+  <!-- Data files (used in Local JSON mode) -->
+  <script>
+    const COLORS = {
+      Parcel: '#ef4444',
+      Plan: '#60a5fa',
+      Zoning:'#f59e0b',
+      Title:'#10b981',
+      Owner:'#8b5cf6',
+      RRR:'#f97316',
+      Assessment:'#3b82f6',
+      Thing:'#9ca3af'
+    };
 
-      <div class="section">
-        <div class="label">Parcel:</div>
-        <div class="value" id="pp-id">—</div>
-      </div>
+    // runtime state
+    let MODE = (window.API_BASE && window.API_BASE.trim()) ? 'API' : 'LOCAL';
+    let MAP, PARCEL_LAYER, CY;
+    let GEOJSON=null;           // synthetic_parcels.geojson
+    let VIEWS_BY_ID={};         // parcel_views.json indexed
+    let CURRENT_PARCEL_ID=null;
 
-      <div class="section">
-        <div class="label">Legal:</div>
-        <div class="value muted" id="pp-legal">(no details)</div>
-      </div>
+    // ---- boot
+    document.addEventListener('DOMContentLoaded', async () => {
+      setModeBadge();
+      await loadLocalData();        // safe to run even if MODE==='API' (helps dropdown)
+      initMap();
+      initGraph();
+      populateJump();
 
-      <div class="section">
-        <div class="label">Title</div>
-        <div class="value" id="pp-title">—</div>
-      </div>
+      document.getElementById('jump').addEventListener('change', e=>{
+        if(e.target.value) onParcelChosen(e.target.value);
+      });
+      document.getElementById('modeBadge').addEventListener('click', () => {
+        MODE = (MODE==='API') ? 'LOCAL' : 'API';
+        setModeBadge();
+        // keep current parcel shown if we have it
+        if(CURRENT_PARCEL_ID) onParcelChosen(CURRENT_PARCEL_ID);
+      });
+    });
 
-      <div class="section">
-        <div class="label">Owner(s)</div>
-        <div class="value" id="pp-owners">—</div>
-      </div>
+    function setModeBadge(){
+      const b = document.getElementById('modeBadge');
+      b.textContent = MODE==='API' ? 'Mode: Live API' : 'Mode: Local JSON';
+    }
 
-      <div class="section">
-        <div class="label">RRR</div>
-        <div class="value" id="pp-rrr">—</div>
-      </div>
+    // ---- data
+    async function loadLocalData(){
+      // Load synthetic files to ensure dropdown & local mode work even if API is selected
+      try{
+        const gj = await fetch('./synthetic_parcels.geojson').then(r=>r.json());
+        GEOJSON = gj;
+      }catch(e){ console.warn('GeoJSON not loaded (ok if API only).', e); }
+      try{
+        const pv = await fetch('./parcel_views.json').then(r=>r.json());
+        VIEWS_BY_ID = {};
+        pv.forEach(v => { if(v?.parcelId) VIEWS_BY_ID[v.parcelId] = v; });
+      }catch(e){ console.warn('parcel_views not loaded (ok if API only).', e); }
+    }
 
-      <div class="section">
-        <div class="label">Zoning</div>
-        <div class="value" id="pp-zoning">—</div>
-      </div>
+    // ---- map
+    function initMap(){
+      MAP = L.map('map', {
+        zoomControl: true,
+        scrollWheelZoom: true,
+      }).setView([49.250, -123.120], 12);   // Vancouver area
 
-      <div class="section">
-        <div class="label">Survey Plan</div>
-        <div class="value" id="pp-plan">—</div>
-      </div>
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution:'&copy; OpenStreetMap',
+        maxZoom: 19
+      }).addTo(MAP);
 
-      <div class="section">
-        <div class="label">Assessment</div>
-        <div class="value" id="pp-assessment">—</div>
-      </div>
+      // draw polygons if we have local data
+      if(GEOJSON){
+        PARCEL_LAYER = L.geoJSON(GEOJSON, {
+          style: { color:'#2563eb', weight:1.5, fillOpacity:0.15 },
+          onEachFeature: (f, layer) => {
+            const pid = f?.properties?.parcelid || f?.properties?.id;
+            layer.on('click', () => {
+              // no fitBounds (prevents auto-zoom), just show details
+              onParcelChosen(pid);
+            });
+          }
+        }).addTo(MAP);
 
-      <div class="section">
-        <div class="label">Graph Legend</div>
-        <div class="legend">
-          <span><i class="dot" style="background:#ef4444"></i>Parcel</span>
-          <span><i class="dot" style="background:#60a5fa"></i>Plan</span>
-          <span><i class="dot" style="background:#fbbf24"></i>Zoning</span>
-          <span><i class="dot" style="background:#10b981"></i>Title</span>
-          <span><i class="dot" style="background:#a78bfa"></i>Owner</span>
-          <span><i class="dot" style="background:#f97316"></i>RRR</span>
-          <span><i class="dot" style="background:#3b82f6"></i>Assessment</span>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+        // Ensure parcels are visible at start
+        try{ MAP.fitBounds(PARCEL_LAYER.getBounds(), { padding:[30,30] }); } catch{}
+      }
+    }
 
-<script>
-(function(){
-  // --------------------------
-  // Config & State
-  // --------------------------
-  const API_BASE = (window.API_BASE ?? '').trim();   // from config.js if present
-  let useLive = !!API_BASE;                           // default mode
-  let map, parcelLayer, cy;
-  let localParcels = []; // filled from GeoJSON in Local mode
-  let lastBounds = null;
+    // ---- graph
+    function initGraph(){
+      CY = cytoscape({
+        container: document.getElementById('graph'),
+        elements: [],
+        style: [
+          {
+            selector:'node',
+            style:{
+              'label':'data(name)',
+              'font-size':9,
+              'text-valign':'center',
+              'text-halign':'center',
+              'color':'#111827',
+              'background-color': ele => COLORS[ele.data('label')] || COLORS.Thing,
+              'border-color':'#374151',
+              'border-width':1,
+              'width':6,
+              'height':6
+            }
+          },
+          {
+            selector:'edge',
+            style:{
+              'width':1,
+              'curve-style':'bezier',
+              'line-color':'#9ca3af',
+              'target-arrow-shape':'triangle',
+              'target-arrow-color':'#9ca3af',
+              'label':'data(type)',
+              'font-size':9,
+              'text-rotation':'autorotate',
+              'text-margin-y':-2,
+              'color':'#6b7280'
+            }
+          },
+          { selector:'.center', style:{ 'width':10, 'height':10, 'border-width':2 } }
+        ],
+        layout:{ name:'cose', fit:true, animate:false }
+      });
+    }
 
-  // Node colors by label
-  const COLORS = {
-    Parcel: '#ef4444',
-    Plan: '#60a5fa',
-    Zoning: '#fbbf24',
-    Title: '#10b981',
-    Owner: '#a78bfa',
-    RRR: '#f97316',
-    Assessment: '#3b82f6',
-    Thing: '#94a3b8'
-  };
+    function drawGraph(data){
+      // data: {nodes:[{id,name,label}], links:[{source,target,type}]}
+      const eles = [];
+      (data.nodes||[]).forEach(n=>{
+        eles.push({ data:{ id:n.id, name:n.name||n.id, label:n.label||'Thing' }, classes:(n.id===CURRENT_PARCEL_ID?'center':'') });
+      });
+      (data.links||[]).forEach(e=>{
+        if(e.source && e.target) eles.push({ data:{ id:`${e.source}->${e.target}-${e.type||''}-${Math.random()}`, source:e.source, target:e.target, type:e.type||'' }});
+      });
+      CY.elements().remove();
+      CY.add(eles);
+      CY.layout({ name:'cose', fit:true, animate:false }).run();
+    }
 
-  // --------------------------
-  // Helpers
-  // --------------------------
-  async function fetchJSON(url){
-    const r = await fetch(url, {cache:'no-cache'});
-    if(!r.ok) throw new Error(`Failed to load ${url}: ${r.status}`);
-    return r.json();
-  }
-  function setText(id, text){ document.getElementById(id).textContent = text ?? '—'; }
-  function fmtOwners(arr){ return (arr && arr.length) ? arr.join(', ') : '—'; }
-  function fmtRRR(arr){ return (arr && arr.length) ? arr.map(x=>x.type||x.name||x).join(', ') : '—'; }
-  function fmtZonings(arr){ return (arr && arr.length) ? arr.map(x=>x.code||x.name||x).join(', ') : '—'; }
-  function fmtPlan(p){ return p?.name || p?.number || '—'; }
-  function fmtAssessment(a){ return a?.id ? `${a.id}` : '—'; }
+    // ---- dropdown
+    function populateJump(){
+      const sel = document.getElementById('jump');
+      // prefer GeoJSON properties for list; otherwise from parcel_views
+      let ids = [];
+      if(GEOJSON?.features){
+        ids = GEOJSON.features.map(f => f?.properties?.parcelid || f?.properties?.id).filter(Boolean);
+      }else{
+        ids = Object.keys(VIEWS_BY_ID);
+      }
+      sel.innerHTML = '<option value="">— choose —</option>' + ids.map(id=>`<option value="${id}">${id}</option>`).join('');
+    }
 
-  function normalizeLabel(s){
-    if(!s) return 'Thing';
-    const k = String(s).toLowerCase();
-    if(k.includes('parcel')) return 'Parcel';
-    if(k.includes('owner')) return 'Owner';
-    if(k.includes('title')) return 'Title';
-    if(k.includes('zoning')) return 'Zoning';
-    if(k.includes('plan')) return 'Plan';
-    if(k.includes('assess')) return 'Assessment';
-    if(k.includes('rrr')||k.includes('right')) return 'RRR';
-    return 'Thing';
-  }
+    // ---- selection
+    async function onParcelChosen(parcelId){
+      CURRENT_PARCEL_ID = parcelId;
 
-  // --------------------------
-  // Map init (BC, Canada)
-  // --------------------------
-  function initMap(){
-    map = L.map('map', { doubleClickZoom:false, zoomControl:true });
-    // Vancouver-ish
-    map.setView([49.250, -123.10], 13);
+      if(MODE==='API' && window.API_BASE){
+        await showFromAPI(parcelId);
+      }else{
+        await showFromLocal(parcelId);
+      }
+    }
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution:'&copy; OpenStreetMap',
-      maxZoom: 19
-    }).addTo(map);
+    // panel helpers
+    function setPanel(source, view, parcelId){
+      const g = (id, html) => document.getElementById(id).innerHTML = html || '—';
+      g('panel-source', source);
+      g('panel-parcel', parcelId || '—');
 
-    parcelLayer = L.geoJSON(null, {
-      style: feat => ({
-        color:'#1f2937', weight:1.2, fillColor:'#93c5fd', fillOpacity:0.35
-      }),
-      onEachFeature: (feat, layer) => {
-        layer.on('click', () => {
-          const id = feat.properties?.id || feat.properties?.parcelid || feat.properties?.parcelId;
-          if(id) showParcel(id, /*centerOnMap*/ true, layer.getBounds());
+      // Legal (if present)
+      g('panel-legal', view?.parcel?.properties?.legalDescription || '(no details)');
+
+      // Title
+      const titles = Array.isArray(view?.titles) ? view.titles : (view?.title ? [view.title] : []);
+      g('panel-title', titles.length ? (titles[0].id || '—') : '—');
+
+      // Owners
+      const owners = titles.flatMap(t => Array.isArray(t.owners) ? t.owners : []);
+      g('panel-owners', owners.length ? owners.map(o=>o.name).join(', ') : '—');
+
+      // RRR
+      const rrrs = Array.isArray(view?.rrrs) ? view.rrrs : [];
+      g('panel-rrr', rrrs.length ? rrrs.map(r=>r.type || r.name).join(', ') : '—');
+
+      // Zoning
+      const zonings = Array.isArray(view?.zonings) ? view.zonings : [];
+      g('panel-zoning', zonings.length ? zonings.map(z=>z.code || z.name).join(', ') : '—');
+
+      // Survey Plan
+      const plans = Array.isArray(view?.plans) ? view.plans : (view?.plan ? [view.plan] : []);
+      g('panel-plan', plans.length ? plans.map(p=>p.number || p.name).join(', ') : '—');
+
+      // Assessment
+      const assess = view?.assessment || (Array.isArray(view?.assessments) ? view.assessments[0] : null);
+      g('panel-assess', assess?.id || '—');
+    }
+
+    // graph build (generic)
+    function graphFromView(view, parcelId){
+      const nodes = [{ id:parcelId, name:parcelId, label:'Parcel' }];
+      const links = [];
+      const seen = new Set();
+      const addNode = (id, name, label) => {
+        if(!id || seen.has(id)) return;
+        nodes.push({ id, name: name||id, label }); seen.add(id);
+      };
+      const addLink = (a,b,t) => { if(a&&b) links.push({ source:a, target:b, type:t }); };
+
+      // Title + Owners
+      const titles = Array.isArray(view?.titles) ? view.titles : (view?.title ? [view.title] : []);
+      titles.forEach((t, i)=>{
+        const tid = t.id || `Title_${i+1}`;
+        addNode(tid, tid, 'Title');
+        addLink(parcelId, tid, 'HAS_TITLE');
+
+        (Array.isArray(t.owners)?t.owners:[]).forEach((o, j)=>{
+          const oid = o.name || `Owner_${i+1}_${j+1}`;
+          addNode(oid, oid, 'Owner');
+          addLink(tid, oid, 'OWNED_BY');
         });
-        layer.on('mouseover', () => layer.setStyle({weight:2.2, fillOpacity:0.45}));
-        layer.on('mouseout',  () => layer.setStyle({weight:1.2, fillOpacity:0.35}));
-      }
-    }).addTo(map);
-  }
+      });
 
-  // --------------------------
-  // Cytoscape graph
-  // --------------------------
-  function initGraph(){
-    cy = cytoscape({
-      container: document.getElementById('graph'),
-      style: [
-        {
-          selector: 'node',
-          style: {
-            'label': 'data(name)',
-            'font-size': 12,
-            'text-valign': 'center',
-            'text-halign': 'center',
-            'color': '#111827',
-            'background-color': ele => COLORS[ normalizeLabel(ele.data('label')) ] || COLORS.Thing,
-            'border-color': '#374151',
-            'border-width': 1,
-            'width': 6, 'height': 6
-          }
-        },
-        {
-          selector: 'edge',
-          style: {
-            'width': 1.2, 'line-color': '#cbd5e1', 'target-arrow-shape':'triangle',
-            'target-arrow-color': '#cbd5e1', 'curve-style':'bezier', 'label':'data(type)',
-            'font-size': 10, 'text-rotation': 'autorotate', 'color':'#6b7280'
-          }
-        },
-        { selector: ':selected', style: { 'border-width':3, 'border-color': '#111827' } }
-      ],
-      layout: { name:'cose', idealEdgeLength:80, nodeRepulsion: 8000 }
-    });
-  }
+      // Zoning
+      (Array.isArray(view?.zonings) ? view.zonings : []).forEach((z, i)=>{
+        const zid = z.code || z.name || `Z_${i+1}`;
+        addNode(zid, zid, 'Zoning'); addLink(parcelId, zid, 'HAS_ZONING');
+      });
 
-  function drawGraph(payload){
-    const nodes = (payload?.nodes || []).map(n => ({
-      data:{
-        id: n.id || n.key || n.name,
-        name: n.name || n.parcelid || n.parcelId || n.id,
-        label: normalizeLabel(n.label || n.labels || n.type)
-      }
-    }));
-    const edges = (payload?.links || payload?.edges || []).map(e => ({
-      data:{
-        id: e.id || (e.source+'->'+e.target+'::'+(e.type||'')),
-        source: e.source || e.src || e.from,
-        target: e.target || e.dst || e.to,
-        type: e.type || e.rel || ''
-      }
-    }));
+      // Plans
+      (Array.isArray(view?.plans)?view.plans:(view?.plan?[view.plan]:[])).forEach((p, i)=>{
+        const pid = p.number || p.name || `P_${i+1}`;
+        addNode(pid, pid, 'Plan'); addLink(parcelId, pid, 'HAS_PLAN');
+      });
 
-    cy.elements().remove();
-    cy.add([...nodes, ...edges]);
-    cy.layout({ name:'cose', idealEdgeLength: 90, nodeRepulsion: 8000 }).run();
-  }
+      // RRRs
+      (Array.isArray(view?.rrrs) ? view.rrrs : []).forEach((r, i)=>{
+        const rid = r.type || r.name || `RRR_${i+1}`;
+        addNode(rid, rid, 'RRR'); addLink(parcelId, rid, 'HAS_RRR');
+      });
 
-  // --------------------------
-  // Parcel Details Panel
-  // --------------------------
-  function paintParcelDetails(data, sourceLabel){
-    document.getElementById('sourceLabel').textContent = `Source: ${sourceLabel}`;
-    setText('pp-id', data?.parcel?.parcelid || data?.parcel?.parcelId || data?.parcelid || '—');
-    setText('pp-legal', data?.parcel?.legalDescription || data?.legalDescription || '(no details)');
-
-    // Title
-    const title = (data?.titles && data.titles[0]) || data?.title;
-    setText('pp-title', title?.id || title?.name || '—');
-
-    // Owners
-    const owners = data?.owners || title?.owners;
-    setText('pp-owners', fmtOwners( owners?.map(o => o.name || o) ));
-
-    // RRR
-    const rrr = data?.rrrs;
-    setText('pp-rrr', fmtRRR( rrr ));
-
-    // Zoning
-    const zonings = data?.zonings;
-    setText('pp-zoning', fmtZonings( zonings ));
-
-    // Plan
-    setText('pp-plan', fmtPlan( data?.plans?.[0] || data?.plan ));
-
-    // Assessment
-    setText('pp-assessment', fmtAssessment( data?.assessments?.[0] || data?.assessment ));
-  }
-
-  // --------------------------
-  // Data Loading
-  // --------------------------
-  async function loadLocal(){
-    const gj = await fetchJSON('./synthetic_parcels.geojson');
-    parcelLayer.clearLayers().addData(gj);
-
-    // build dropdown list from GeoJSON
-    localParcels = [];
-    const select = document.getElementById('parcel-select');
-    select.innerHTML = '<option value="">— choose —</option>';
-
-    gj.features.forEach(f=>{
-      const id = f.properties?.id || f.properties?.parcelid || f.properties?.parcelId;
-      const name = f.properties?.name || id;
-      if(id){
-        localParcels.push({ id, name, bounds: L.geoJSON(f).getBounds() });
-        const opt = document.createElement('option');
-        opt.value = id; opt.textContent = name;
-        select.appendChild(opt);
-      }
-    });
-  }
-
-  async function loadApiIndex(){
-    // If backend exposes a list endpoint, use it; otherwise we fall back to GeoJSON anyway
-    // For consistency with previous demo, we’ll keep polygons from local GeoJSON but details/graph from API.
-    await loadLocal();
-  }
-
-  // --------------------------
-  // Show parcel (both modes)
-  // --------------------------
-  async function showParcel(parcelId, centerOnMap=false, bounds=null){
-    if(!parcelId) return;
-
-    // map centering without aggressive zoom:
-    if(centerOnMap && (bounds || lastBounds)){
-      const b = bounds || lastBounds;
-      const currentZoom = map.getZoom();
-      map.fitBounds(b, { padding:[24,24], maxZoom: currentZoom });
+      // Assessment
+      const assess = view?.assessment || (Array.isArray(view?.assessments)?view.assessments[0]:null);
+      if(assess?.id){ addNode(assess.id, assess.id, 'Assessment'); addLink(parcelId, assess.id, 'HAS_ASSESSMENT'); }
+      return { nodes, links };
     }
 
-    if(useLive && API_BASE){
+    // ---- mode handlers
+    async function showFromLocal(parcelId){
+      const view = VIEWS_BY_ID[parcelId] || {
+        parcel:{ properties:{ legalDescription:null } },
+        titles:[], zonings:[], plans:[], rrrs:[], assessments:[]
+      };
+      setPanel('Local JSON', view, parcelId);
+      drawGraph( graphFromView(view, parcelId) );
+    }
+
+    async function showFromAPI(parcelId){
       try{
-        // Metadata/details
-        const details = await fetchJSON(`${API_BASE}/api/v1/parcels/${encodeURIComponent(parcelId)}`);
-        paintParcelDetails(details, 'Live API');
+        const [parcelView, graphResp] = await Promise.all([
+          fetch(`${window.API_BASE}/api/v1/parcels/${encodeURIComponent(parcelId)}`).then(r=>r.json()),
+          fetch(`${window.API_BASE}/api/v1/graph/parcel/${encodeURIComponent(parcelId)}`).then(r=>r.json()).catch(()=>null)
+        ]);
 
-        // Graph
-        const graph = await fetchJSON(`${API_BASE}/api/v1/graph/parcel/${encodeURIComponent(parcelId)}`);
-        drawGraph(graph);
-      }catch(e){
-        console.error(e);
-        paintParcelDetails({}, 'Live API (error)');
-        drawGraph({nodes:[], links:[]});
-      }
-    }else{
-      // Local JSON fallback
-      try{
-        const views = await fetchJSON('./parcel_views.json');
-        const found = views[parcelId] || views.find?.(x => x.parcel?.parcelid===parcelId || x.parcelid===parcelId) || {};
-        paintParcelDetails(found, 'Local JSON');
+        setPanel('Live API', parcelView, parcelId);
 
-        // Tiny local graph (optional)
-        const g = localGraphFromView(found, parcelId);
-        drawGraph(g);
+        // Prefer API graph if present; else derive from the view as a fallback
+        if(graphResp && graphResp.nodes && graphResp.links){
+          drawGraph(graphResp);
+        }else{
+          drawGraph( graphFromView(parcelView, parcelId) );
+        }
       }catch(e){
-        console.error(e);
-        paintParcelDetails({}, 'Local JSON (error)');
-        drawGraph({nodes:[], links:[]});
+        console.error('API error', e);
+        setPanel('Live API (error)', {}, parcelId);
+        drawGraph({nodes:[{id:parcelId,name:parcelId,label:'Parcel'}], links:[]});
       }
     }
-  }
-
-
-  function localGraphFromView(view, parcelId){
-  const nodes = [{ id: parcelId, name: parcelId, label:'Parcel' }];
-  const links = [];
-
-  // helper to add node once
-  const seen = new Set();
-  function addNode(id, name, label){
-    if(!id) return;
-    if(!seen.has(id)){
-      nodes.push({ id, name: name || id, label });
-      seen.add(id);
-    }
-  }
-  function addLink(src, dst, type){
-    if(src && dst) links.push({ source: src, target: dst, type });
-  }
-
-  // Title & Owners
-  const titles = Array.isArray(view?.titles) ? view.titles : (view?.title ? [view.title] : []);
-  titles.forEach((t, ti)=>{
-    const tid = t.id || `Title_${ti+1}`;
-    addNode(tid, t.id || 'Title', 'Title');
-    addLink(parcelId, tid, 'HAS_TITLE');
-
-    const owners = Array.isArray(t.owners) ? t.owners : [];
-    owners.forEach((o, oi)=>{
-      const oid = o.name || `Owner_${ti+1}_${oi+1}`;
-      addNode(oid, oid, 'Owner');
-      addLink(tid, oid, 'OWNED_BY');
-    });
-  });
-
-  // Zoning
-  (Array.isArray(view?.zonings) ? view.zonings : []).forEach((z, zi)=>{
-    const zid = z.code || z.name || `Z_${zi+1}`;
-    addNode(zid, zid, 'Zoning');
-    addLink(parcelId, zid, 'HAS_ZONING');
-  });
-
-  // Plans
-  (Array.isArray(view?.plans) ? view.plans : (view?.plan ? [view.plan] : [])).forEach((p, pi)=>{
-    const pid = p.number || p.name || `P_${pi+1}`;
-    addNode(pid, pid, 'Plan');
-    addLink(parcelId, pid, 'HAS_PLAN');
-  });
-
-  // RRRs
-  (Array.isArray(view?.rrrs) ? view.rrrs : []).forEach((r, ri)=>{
-    const rid = r.type || r.name || `RRR_${ri+1}`;
-    addNode(rid, rid, 'RRR');
-    addLink(parcelId, rid, 'HAS_RRR');
-  });
-
-  // Assessment
-  const assess = view?.assessment || (Array.isArray(view?.assessments) ? view.assessments[0] : null);
-  if(assess?.id){
-    addNode(assess.id, assess.id, 'Assessment');
-    addLink(parcelId, assess.id, 'HAS_ASSESSMENT');
-  }
-
-  return { nodes, links };
-}
-
-
-  // --------------------------
-  // UI wiring
-  // --------------------------
-  function wireUI(){
-    const select = document.getElementById('parcel-select');
-    select.addEventListener('change', ()=>{
-      const id = select.value;
-      if(!id) return;
-      // find matching polygon bounds (from localParcels)
-      const entry = localParcels.find(p => p.id === id);
-      lastBounds = entry?.bounds || null;
-      showParcel(id, true, lastBounds);
-    });
-
-    const btn = document.getElementById('modeBtn');
-    const updateBtn = ()=> btn.textContent = 'Mode: ' + (useLive && API_BASE ? 'Live API' : 'Local JSON');
-    btn.addEventListener('click', ()=>{
-      useLive = !useLive && !!API_BASE ? true : false; // can only go Live if API_BASE exists
-      updateBtn();
-      document.getElementById('sourceLabel').textContent = 'Source: —';
-    });
-    updateBtn();
-  }
-
-  // --------------------------
-  // Boot
-  // --------------------------
-  window.addEventListener('DOMContentLoaded', async ()=>{
-    initMap();
-    initGraph();
-    wireUI();
-
-    // Always load polygons from local GeoJSON for now (stable & fast)
-    await loadLocal();
-
-    // If you want the dropdown to come from API, call loadApiIndex() instead.
-    // await loadApiIndex();
-  });
-})();
-</script>
+  </script>
 </body>
 </html>
