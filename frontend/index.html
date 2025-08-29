@@ -2,337 +2,484 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Parcel Demo — Map + Parcel Details + Graph</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-
+  <title>Parcel Demo</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha384-tAGcCfGfGJ5lUSQ7j5f0p9m4l6f3pC0mQwz3o7bC1uJkQKc7Zb4QqQKfH6uKpZrt"
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha384-3J6lZ8K1qQm9y0w2w2a8xv9z3b5d9Sn9a2jZlV2w7+0k9s4cRzYl2Z1bJcS4s6dG"
+    crossorigin=""
+  ></script>
 
-  <!-- Cytoscape -->
-  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+  <!-- Cytoscape (graph) -->
+  <script src="https://unpkg.com/cytoscape@3.28.0/dist/cytoscape.min.js"></script>
+
+  <!-- App config: must define window.API_BASE -->
+  <script src="./config.js"></script>
 
   <style>
-    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    :root{
+      --divider:#cfd4da;
+      --divider-thick:5px; /* ≈ 1.5mm */
+      --panel-bg:#fff;
+      --ink:#1f2937;
+      --muted:#6b7280;
+      --accent:#2563eb;
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #f7f7f8;
+      color: var(--ink);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+    }
 
-    /* Floating controls (top-left) */
-    #controls {
-      position: absolute; top: 10px; left: 10px; z-index: 1000;
-      background: #fff; border: 1px solid #ddd; border-radius: 8px;
-      padding: 8px 10px; box-shadow: 0 2px 8px rgba(0,0,0,.1);
-      font: 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      display: flex; gap: 8px; align-items: center;
+    /* --- Layout --------------------------------------------------------- */
+    .page {
+      height: 100%;
+      display: grid;
+      grid-template-columns: 72% var(--divider-thick) 28%;
+      grid-template-rows: 1fr;
     }
-    #controls select, #controls button {
-      font: inherit; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff;
+    .left-col {
+      display: grid;
+      grid-template-rows: 1fr var(--divider-thick) 28vh;  /* graph ≈ 25–30% */
+      grid-template-columns: 100%;
+      background: var(--panel-bg);
+    }
+    .v-divider {
+      width: var(--divider-thick);
+      background: var(--divider);
+    }
+    .h-divider {
+      height: var(--divider-thick);
+      background: var(--divider);
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+    #graph {
+      width: 100%;
+      height: 100%;
+      background: #fff;
+    }
+    .right-panel {
+      background: var(--panel-bg);
+      overflow: auto;
+      padding: 16px 16px 24px;
     }
 
-    /* Bottom info panel */
-    #details {
-      position: absolute; left: 0; right: 0; bottom: 0; max-height: 42%;
-      background: rgba(255,255,255,.97); border-top: 2px solid #e5e5e5;
-      padding: 10px; z-index: 900; overflow: auto;
-      font: 14px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    /* --- Header / controls --------------------------------------------- */
+    .topbar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.95);
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.04);
     }
-    #columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    #parcelPanel { border: 1px solid #e8e8e8; border-radius: 8px; padding: 10px; }
-    #graphPanel  { border: 1px solid #e8e8e8; border-radius: 8px; height: 260px; }
-    @media (max-width: 900px) { #columns { grid-template-columns: 1fr; } }
+    .topbar label { font-size: 14px; color: var(--muted); }
+    .select {
+      padding: 6px 8px;
+      font-size: 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+      min-width: 220px;
+    }
+    .mode {
+      padding: 6px 10px;
+      font-size: 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      cursor: default;
+    }
+
+    /* --- Parcel details panel ------------------------------------------ */
+    .p-title { font-weight: 700; font-size: 18px; margin: 0 0 12px; }
+    .p-subtle { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+    .p-row { margin: 10px 0 14px; }
+    .p-label { font-weight: 600; margin-bottom: 4px; }
+    .p-line { height: 2px; width: 100%; background: #eef2f7; margin: 6px 0 0; }
+    .pill {
+      display:inline-block; font-size:11px; padding:2px 6px; border-radius:999px;
+      background:#eef2ff; color:#1e40af; border:1px solid #dbe3ff; margin-right:6px;
+    }
+    .legend {
+      display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;
+    }
+    .legend-item { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+    .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+
+    /* --- Leaflet popup tidy -------------------------------------------- */
+    .leaflet-popup-content { margin: 8px 12px; }
+    .leaflet-container a { color: var(--accent); }
   </style>
 </head>
 <body>
-  <div id="map"></div>
+  <div class="page">
+    <!-- LEFT COLUMN -->
+    <div class="left-col">
+      <div style="position:relative">
+        <!-- Controls floating over map -->
+        <div class="topbar">
+          <label for="parcelSelect">Jump to parcel:</label>
+          <select id="parcelSelect" class="select">
+            <option value="">— choose —</option>
+          </select>
+          <span id="modeBadge" class="mode">Mode: …</span>
+        </div>
 
-  <div id="controls">
-    <label for="parcelSelect">Parcel:</label>
-    <select id="parcelSelect"><option value="">— choose —</option></select>
-    <button id="btnFit" type="button">Fit</button>
-    <span id="sourceBadge" style="color:#666;font-size:12px;">Init…</span>
-  </div>
+        <div id="map"></div>
+      </div>
 
-  <div id="details">
-    <div id="columns">
-      <div id="parcelPanel">Select a parcel on the map or choose from the dropdown.</div>
-      <div id="graphPanel"></div>
+      <div class="h-divider"></div>
+      <div id="graph"></div>
     </div>
-  </div>
 
-  <!-- Must define window.API_BASE ("" for local JSON; or your Render backend URL) -->
-  <script src="config.js"></script>
+    <!-- VERTICAL DIVIDER -->
+    <div class="v-divider"></div>
+
+    <!-- RIGHT COLUMN: PARCEL DETAILS -->
+    <aside class="right-panel" id="details">
+      <h2 class="p-title" id="d-heading">Parcel</h2>
+      <div class="p-subtle" id="d-source">Source: —</div>
+
+      <div class="p-row">
+        <div class="p-label">Parcel:</div>
+        <div id="d-parcelid">—</div>
+        <div class="p-line"></div>
+      </div>
+
+      <div class="p-row">
+        <div class="p-label">Legal:</div>
+        <div id="d-legal">(no details)</div>
+        <div class="p-line"></div>
+      </div>
+
+      <div class="p-row">
+        <div class="p-label">Title</div>
+        <div id="d-title">—</div>
+        <div class="p-line"></div>
+      </div>
+
+      <div class="p-row">
+        <div class="p-label">Owner(s)</div>
+        <div id="d-owners">—</div>
+        <div class="p-line"></div>
+      </div>
+
+      <div class="p-row">
+        <div class="p-label">RRR</div>
+        <div id="d-rrr">—</div>
+        <div class="p-line"></div>
+      </div>
+
+      <div class="p-row">
+        <div class="p-label">Zoning</div>
+        <div id="d-zoning">—</div>
+        <div class="p-line"></div>
+      </div>
+
+      <div class="p-row">
+        <div class="p-label">Survey Plan</div>
+        <div id="d-plans">—</div>
+        <div class="p-line"></div>
+      </div>
+
+      <div class="p-row">
+        <div class="p-label">Assessment</div>
+        <div id="d-assessment">—</div>
+        <div class="p-line"></div>
+      </div>
+
+      <div class="p-row">
+        <div class="p-label" style="margin-bottom:6px;">Graph Legend</div>
+        <div class="legend">
+          <span class="legend-item"><span class="dot" style="background:#f47174"></span>Parcel</span>
+          <span class="legend-item"><span class="dot" style="background:#7dd3fc"></span>Plan</span>
+          <span class="legend-item"><span class="dot" style="background:#fde047"></span>Zoning</span>
+          <span class="legend-item"><span class="dot" style="background:#86efac"></span>Title</span>
+          <span class="legend-item"><span class="dot" style="background:#a78bfa"></span>Owner</span>
+          <span class="legend-item"><span class="dot" style="background:#f59e0b"></span>RRR</span>
+          <span class="legend-item"><span class="dot" style="background:#60a5fa"></span>Assessment</span>
+        </div>
+      </div>
+    </aside>
+  </div>
 
   <script>
-  // ---------------- Config / DOM ----------------
-  const API_BASE = (window.API_BASE || "").trim();
-  const USING_API = !!API_BASE;
+    // ---------------------- helpers ----------------------
+    const API_BASE = (window.API_BASE ?? "").trim();
+    const USING_API = API_BASE.length > 0;
+    const MODE_BADGE = document.getElementById('modeBadge');
+    MODE_BADGE.textContent = USING_API ? "Mode: Live API" : "Mode: Local JSON";
 
-  const $select      = document.getElementById('parcelSelect');
-  const $btnFit      = document.getElementById('btnFit');
-  const $parcelPanel = document.getElementById('parcelPanel');
-  const $graphHost   = document.getElementById('graphPanel');
-  const $badge       = document.getElementById('sourceBadge');
+    const BC_CENTER = [49.25, -123.12]; // Vancouver-ish
+    const BC_ZOOM   = 12;
 
-  $badge.textContent = USING_API ? 'Live API' : 'Local JSON';
+    function $(id){ return document.getElementById(id); }
 
-  // ---------------- Map ----------------
-  const map = L.map('map');
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '&copy; OpenStreetMap'
-  }).addTo(map);
-  // Center over Metro Vancouver, BC
-  map.setView([49.25, -123.12], 11);
-  map.doubleClickZoom.disable(); // avoid accidental zoom-in on double-click
-
-  const parcelsLayer = L.geoJSON(null, {
-    onEachFeature: (feature, layer) => {
-      layer.on('click', () => {
-        const id = feature.properties?.parcelId || feature.properties?.id;
-        if (id) selectParcel(id, true);
-      });
-    },
-    style: { color: '#3388ff', weight: 2, fillColor: '#3388ff', fillOpacity: .15 }
-  }).addTo(map);
-
-  $btnFit.addEventListener('click', () => {
-    try { map.fitBounds(parcelsLayer.getBounds(), { padding: [20,20] }); } catch(e) {}
-  });
-
-  // ---------------- GeoJSON hygiene ----------------
-  // Ensure properties.parcelId exists and auto-fix swapped lat/lon if polygons cluster near (0,0)
-  function ensureParcelIds(gj){
-    (gj.features||[]).forEach(f=>{
-      f.properties = f.properties || {};
-      f.properties.parcelId = f.properties.parcelId
-        || f.properties.id || f.id
-        || f.properties.PARCEL_ID || f.properties.ParcelID || "";
-    });
-  }
-  function maybeSwapLonLat(gj){
-    const sample = [];
-    (gj.features||[]).forEach(f=>{
-      const g=f.geometry; if(!g) return;
-      const coords = g.type==="Polygon" ? g.coordinates.flat(2)
-                   : g.type==="MultiPolygon" ? g.coordinates.flat(3) : [];
-      for (let i=0; i<coords.length && sample.length<60; i+=Math.max(1,Math.floor(coords.length/10))){
-        const p=coords[i]; if(Array.isArray(p)&&typeof p[0]==="number") sample.push(p);
-      }
-    });
-    if(!sample.length) return;
-    let suspicious=0;
-    for(const [x,y] of sample){
-      const lon=x, lat=y;
-      if (Math.abs(lat)>90 || (Math.abs(lon)<5 && Math.abs(lat)<5)) suspicious++;
+    function setDetailsSkeleton(pid, source){
+      $('d-heading').textContent = `Parcel ${pid || ''}`.trim();
+      $('d-source').textContent  = `Source: ${source}`;
+      $('d-parcelid').textContent= pid || '—';
+      $('d-legal').textContent   = '(no details)';
+      $('d-title').textContent   = '—';
+      $('d-owners').textContent  = '—';
+      $('d-rrr').textContent     = '—';
+      $('d-zoning').textContent  = '—';
+      $('d-plans').textContent   = '—';
+      $('d-assessment').textContent = '—';
     }
-    if (suspicious >= sample.length*0.6){
-      const swapAll = arr=>{
-        for(let i=0;i<arr.length;i++){
-          const v=arr[i];
-          if(Array.isArray(v) && typeof v[0]==='number'){ arr[i]=[v[1],v[0]]; }
-          else if(Array.isArray(v)) swapAll(v);
-        }
-      };
-      (gj.features||[]).forEach(f=>{
-        const g=f.geometry; if(!g) return;
-        if (g.type==="Polygon" || g.type==="MultiPolygon") swapAll(g.coordinates);
-      });
+
+    function pills(list, empty='—'){
+      if(!list || list.length===0) return empty;
+      return list.map(x => `<span class="pill">${x}</span>`).join(' ');
     }
-  }
 
-  // ---------------- Boot ----------------
-  window.addEventListener('DOMContentLoaded', boot);
+    // ---------------------- map -------------------------
+    const map = L.map('map', {
+      zoomControl: true,
+      scrollWheelZoom: true,
+      doubleClickZoom: false, // keep zoom stable when interacting
+      boxZoom: true,
+      keyboard: true
+    }).setView(BC_CENTER, BC_ZOOM);
 
-  async function boot() {
-    try {
-      if (USING_API) {
-        await loadParcelsFromAPI();
-      } else {
-        await loadParcelsFromLocalViews();
-      }
-      await loadGeojsonLocal();  // draw polygons (from local geojson)
-    } catch (e) {
-      console.error('Boot error', e);
-    }
-  }
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
 
-  // Dropdown ids
-  async function loadParcelsFromAPI() {
-    const res = await fetch(`${API_BASE}/api/v1/parcels?_=${Date.now()}`, { cache: 'no-store' });
-    const data = await res.json();
-    const ids = data.parcels || [];
-    fillDropdown(ids);
-  }
-  async function loadParcelsFromLocalViews() {
-    const res = await fetch('parcel_views.json', { cache: 'no-store' });
-    const data = await res.json();
-    fillDropdown(Object.keys(data || {}));
-  }
-  function fillDropdown(ids) {
-    $select.innerHTML = '<option value="">— choose —</option>';
-    ids.sort().forEach(id => {
-      const opt = document.createElement('option');
-      opt.value = id; opt.textContent = id;
-      $select.appendChild(opt);
-    });
-  }
+    let parcelLayer = null;     // GeoJSON layer for polygons
+    const parcelIndex = new Map(); // parcelId -> feature
 
-  // Polygons from local geojson (make sure it has BC coordinates!)
-  async function loadGeojsonLocal() {
-    const res = await fetch('synthetic_parcels.geojson', { cache:'no-store' });
-    const gj = await res.json();
-    ensureParcelIds(gj);
-    maybeSwapLonLat(gj);
-
-    parcelsLayer.clearLayers();
-    parcelsLayer.addData(gj);
-    try { map.fitBounds(parcelsLayer.getBounds(), { padding:[20,20] }); } catch {}
-  }
-
-  // ---------------- Select (from dropdown or map) ----------------
-  $select.addEventListener('change', ev => {
-    const id = ev.target.value;
-    if (id) selectParcel(id, false);
-  });
-
-  async function selectParcel(id, fromMap) {
-    if (!id) return;
-    if (fromMap) $select.value = id;
-    highlightParcelOnMap(id);
-    await loadParcelDetails(id);
-    await loadParcelGraph(id);
-  }
-
-  function highlightParcelOnMap(id) {
-    parcelsLayer.eachLayer(layer => {
-      const fid = layer.feature?.properties?.parcelId || layer.feature?.properties?.id;
-      if (!fid) return;
-      const isHit = (String(fid) === String(id));
-      layer.setStyle({
-        color: isHit ? '#ef476f' : '#3388ff',
-        weight: isHit ? 3 : 2,
-        fillColor: '#3388ff',
-        fillOpacity: isHit ? .22 : .15
-      });
-    });
-    // IMPORTANT: no map.fitBounds() here — keep user’s current zoom/position
-  }
-
-  // ---------------- Details ----------------
-  async function loadParcelDetails(id) {
-    try {
-      if (USING_API) {
-        const url = `${API_BASE}/api/v1/parcels/${encodeURIComponent(id)}?_=${Date.now()}`;
-        const d = await (await fetch(url, { cache: 'no-store' })).json();
-        renderDetails(d);
-        $badge.textContent = 'Live API';
-      } else {
-        const views = await (await fetch('parcel_views.json', { cache: 'no-store' })).json();
-        renderLocalDetails(id, views[id] || {});
-        $badge.textContent = 'Local JSON';
-      }
-    } catch (e) {
-      console.error('parcel details error', e);
-      $parcelPanel.innerHTML = '<em>Failed to load parcel details.</em>';
-    }
-  }
-
-  function renderDetails(d) {
-    const p = d.parcel?.properties || d.parcel || {};
-    const titles = (d.titles || []).map(x => x.properties?.titleId || x.properties?.id || x.id).filter(Boolean);
-    const owners = (d.owners || []).map(x => x.properties?.name || x.properties?.id || x.id).filter(Boolean);
-    const rrrs   = (d.rrrs   || []).map(x => x.properties?.type || x.properties?.kind || x.properties?.name || x.id).filter(Boolean);
-    const zones  = (d.zoning || d.zonings || []).map(x => x.properties?.zoningId || x.properties?.zoneId || x.properties?.name || x.id).filter(Boolean);
-    const plans  = (d.plans  || []).map(x => x.properties?.planId || x.properties?.name || x.id).filter(Boolean);
-    const assess = (d.assessments || []).map(x => x.properties?.assessmentId || x.properties?.id || x.id).filter(Boolean);
-
-    $parcelPanel.innerHTML = `
-      <div><b>Parcel:</b> ${p.parcelId || '—'}</div>
-      <div><b>Legal:</b> ${p.legalDescription || '—'}</div>
-      <hr/>
-      <div><b>Title</b><br/>${titles.join('<br/>') || '—'}</div>
-      <div><b>Owner(s)</b><br/>${owners.join('<br/>') || '—'}</div>
-      <div><b>RRR</b><br/>${rrrs.join('<br/>') || '—'}</div>
-      <div><b>Zoning</b><br/>${zones.join('<br/>') || '—'}</div>
-      <div><b>Survey Plan</b><br/>${plans.join('<br/>') || '—'}</div>
-      <div><b>Assessment</b><br/>${assess.join('<br/>') || '—'}</div>
-    `;
-  }
-
-  function renderLocalDetails(id, dv) {
-    $parcelPanel.innerHTML = `
-      <div><b>Parcel:</b> ${id}</div>
-      <div><b>Title:</b> ${dv.titleId || '—'}</div>
-      <div><b>Owner(s):</b> ${(dv.owners || []).join(', ') || '—'}</div>
-      <div><b>RRR:</b> ${(dv.rrr || []).join(', ') || '—'}</div>
-      <div><b>Zoning:</b> ${dv.zoning || '—'}</div>
-      <div><b>Survey Plan:</b> ${dv.planId || '—'}</div>
-      <div><b>Assessment:</b> ${dv.assessmentId || '—'}</div>
-    `;
-  }
-
-  // ---------------- Graph ----------------
-  let cy = null;
-  function ensureCy() {
-    if (cy) return cy;
-    cy = cytoscape({
-      container: $graphHost,
+    // ---------------------- graph -----------------------
+    const cy = cytoscape({
+      container: document.getElementById('graph'),
+      boxSelectionEnabled: false,
+      autounselectify: true,
       style: [
-        { selector: 'node[kind = "Parcel"]',      style: { 'background-color': '#ef476f', 'label': 'data(title)', 'font-size': 11, 'text-wrap':'wrap','text-max-width': 140 } },
-        { selector: 'node[kind = "Owner"]',       style: { 'background-color': '#80ed99', 'label': 'data(title)' } },
-        { selector: 'node[kind = "Title"]',       style: { 'background-color': '#2ec4b6', 'label': 'data(title)' } },
-        { selector: 'node[kind = "RRR"]',         style: { 'background-color': '#ffd166', 'label': 'data(title)' } },
-        { selector: 'node[kind = "Zoning"]',      style: { 'background-color': '#f4a261', 'label': 'data(title)' } },
-        { selector: 'node[kind = "Assessment"]',  style: { 'background-color': '#6c8ae4', 'label': 'data(title)' } },
-        { selector: 'node[kind = "SurveyPlan"]',  style: { 'background-color': '#90caf9', 'label': 'data(title)' } },
-        // Fallback
-        { selector: 'node', style: { 'background-color': '#6c8ae4', 'label': 'data(title)', 'font-size': 10, 'text-wrap':'wrap','text-max-width': 140 } },
-        { selector: 'edge', style: { 'width': 2, 'line-color': '#9aa0a6', 'target-arrow-shape':'triangle', 'target-arrow-color':'#9aa0a6', 'curve-style': 'bezier', 'label':'data(type)', 'font-size': 8 } }
-      ]
+        { selector: 'node[label = "Parcel"]',
+          style: { 'background-color':'#f47174','label':'data(name)','font-size':12 } },
+        { selector: 'node[label = "Plan"]',
+          style: { 'background-color':'#7dd3fc','label':'data(name)','font-size':12 } },
+        { selector: 'node[label = "Zoning"]',
+          style: { 'background-color':'#fde047','label':'data(name)','font-size':12 } },
+        { selector: 'node[label = "Title"]',
+          style: { 'background-color':'#86efac','label':'data(name)','font-size':12 } },
+        { selector: 'node[label = "Owner"]',
+          style: { 'background-color':'#a78bfa','label':'data(name)','font-size':12 } },
+        { selector: 'node[label = "RRR"]',
+          style: { 'background-color':'#f59e0b','label':'data(name)','font-size':12 } },
+        { selector: 'node[label = "Assessment"]',
+          style: { 'background-color':'#60a5fa','label':'data(name)','font-size':12 } },
+        { selector: 'edge',
+          style: { 'width': 2, 'line-color':'#cbd5e1','target-arrow-shape':'triangle','target-arrow-color':'#cbd5e1','curve-style':'bezier', 'label':'data(type)','font-size':10,'text-rotation':'autorotate','text-margin-y':-6 } }
+      ],
+      layout: { name: 'cose', animate: false }
     });
-    return cy;
-  }
 
-  async function loadParcelGraph(id) {
-    const c = ensureCy();
-    if (!id) { c.elements().remove(); return; }
-    if (!USING_API) { c.elements().remove(); return; }
+    function drawGraph(payload){
+      // payload: {nodes:[{id,name,label}], links:[{source,target,type}]}
+      cy.elements().remove();
 
-    const url = `${API_BASE}/api/v1/graph/parcel/${encodeURIComponent(id)}?_=${Date.now()}`;
-    try {
-      const g = await (await fetch(url, { cache: 'no-store' })).json();
-
-      const nodes = (g.nodes || []).map(n => ({
-        group: 'nodes',
-        data: {
-          id: String(n.id),
-          title: n.title ||
-                 n.properties?.parcelId || n.properties?.name ||
-                 n.properties?.titleId || n.properties?.planId ||
-                 n.properties?.zoningId || n.properties?.assessmentId ||
-                 n.id || 'Node',
-          // prefer explicit n.kind; else first label from n.labels; else "Node"
-          kind: n.kind || (Array.isArray(n.labels) && n.labels.length ? n.labels[0] : 'Node')
-        }
+      const nodes = (payload.nodes || []).map(n => ({
+        data:{ id:n.id, name:n.name || n.id, label:n.label || 'Thing' }
+      }));
+      const edges = (payload.links || []).map(e => ({
+        data:{ id:`${e.source}->${e.target}:${e.type}`, source:e.source, target:e.target, type:e.type || '' }
       }));
 
-      const edges = (g.links || g.edges || []).map(e => ({
-        group: 'edges',
-        data: {
-          id: e.id ? String(e.id) : `${e.source ?? e.start}->${e.target ?? e.end}:${e.type || ''}`,
-          source: String(e.source ?? e.start),
-          target: String(e.target ?? e.end),
-          type: e.type || ''
-        }
-      }));
-
-      c.elements().remove();
-      c.add(nodes);
-      c.add(edges);
-      c.layout({ name: 'cose', animate: true }).run();
-      if (c.elements().length) c.fit(c.elements(), 30);
-    } catch (err) {
-      console.error('graph load error', err);
-      c.elements().remove();
+      cy.add([...nodes, ...edges]);
+      cy.layout({ name:'cose', animate:false, fit:true, padding: 30 }).run();
     }
-  }
+
+    // ---------------------- data loading ----------------
+    async function fetchJSON(url){
+      const r = await fetch(url, { headers:{'accept':'application/json'} });
+      if(!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+      return r.json();
+    }
+
+    async function loadParcelsAndBuild(){
+      // 1) load polygons
+      let gj;
+      if(USING_API){
+        // Your backend doesn’t expose all polygons; we keep static polygons even in API mode.
+        // If you later expose /api/v1/parcels.geojson, swap here.
+        gj = await fetchJSON('./synthetic_parcels.geojson');
+      } else {
+        gj = await fetchJSON('./synthetic_parcels.geojson');
+      }
+
+      // 2) render polygons
+      parcelLayer = L.geoJSON(gj, {
+        style: f => ({ color:'#2563eb', weight: 1.2, fillColor:'#93c5fd', fillOpacity: 0.25 }),
+        onEachFeature: (feature, layer) => {
+          const id = feature.properties?.parcelId || feature.properties?.id || '';
+          if(id) parcelIndex.set(id, {feature, layer});
+          // Click: show details, but do NOT change zoom automatically
+          layer.on('click', () => {
+            showParcel(id, {centerOnMap:false});
+          });
+        }
+      }).addTo(map);
+
+      // 3) populate dropdown
+      const select = $('parcelSelect');
+      const ids = Array.from(parcelIndex.keys()).sort();
+      ids.forEach(id => {
+        const opt = document.createElement('option');
+        opt.value = id; opt.textContent = id;
+        select.appendChild(opt);
+      });
+      select.addEventListener('change', () => {
+        const id = select.value;
+        if(id) showParcel(id, {centerOnMap:true});
+      });
+
+      // optional: center roughly over polygon set
+      try{
+        const b = parcelLayer.getBounds();
+        if(b.isValid()){
+          // Start in BC anyway, but keep a generous fit if polygons are far
+          const dist = map.getCenter().distanceTo(b.getCenter());
+          if(dist > 10000) map.fitBounds(b, { padding:[20,20] });
+        }
+      }catch(_){}
+    }
+
+    // ---------------------- parcel display ----------------
+    async function showParcel(parcelId, {centerOnMap} = {centerOnMap:false}){
+      if(!parcelId) return;
+
+      // Highlight on map (no zoom out)
+      const entry = parcelIndex.get(parcelId);
+      if(entry){
+        entry.layer.bringToFront();
+        entry.layer.setStyle({ color:'#1d4ed8', weight:2.5, fillOpacity:0.35 });
+        // center map only if requested AND the parcel is quite off-screen
+        if(centerOnMap){
+          const bounds = entry.layer.getBounds();
+          const viewB = map.getBounds();
+          const inside = viewB.contains(bounds);
+          if(!inside) map.fitBounds(bounds, { padding:[30,30], maxZoom: map.getZoom() }); // do not zoom out beyond current
+        }
+        // brief visual pulse
+        setTimeout(() => entry.layer.setStyle({ color:'#2563eb', weight:1.2, fillOpacity:0.25 }), 800);
+      }
+
+      // Fill details + graph
+      setDetailsSkeleton(parcelId, USING_API ? 'Live API' : 'Local JSON');
+
+      try{
+        let parcel;
+        if(USING_API){
+          parcel = await fetchJSON(`${API_BASE}/api/v1/parcels/${encodeURIComponent(parcelId)}`);
+        } else {
+          // static view json holds attributes keyed by parcelId
+          const views = await fetchJSON('./parcel_views.json');
+          parcel = views[parcelId] || { parcelId };
+        }
+
+        // Details
+        $('d-heading').textContent = `Parcel ${parcel.parcelId || parcelId}`;
+        $('d-parcelid').textContent = parcel.parcelId || parcelId;
+        $('d-legal').textContent    = parcel.legalDescription || '(no details)';
+
+        $('d-title').innerHTML      = pills([parcel.title?.titleNumber || parcel.titleNumber].filter(Boolean));
+        const owners = (parcel.owners || parcel.title?.owners || []).map(o => o.name || o);
+        $('d-owners').innerHTML     = pills(owners);
+
+        const rrrs = (parcel.rrrs || parcel.rrr || []).map(r => r.type || r);
+        $('d-rrr').innerHTML        = pills(rrrs);
+
+        const zones = (parcel.zonings || parcel.zoning || []).map(z => z.code || z);
+        $('d-zoning').innerHTML     = pills(zones);
+
+        const plans = (parcel.plans || parcel.plan ? [parcel.plan] : []).map(p => p?.number || p).filter(Boolean);
+        $('d-plans').innerHTML      = pills(plans);
+
+        const assess = (parcel.assessment ? [`${parcel.assessment?.category || ''} ${parcel.assessment?.number || ''}`.trim()] : []);
+        $('d-assessment').innerHTML = pills(assess);
+
+      }catch(err){
+        console.error('details error', err);
+      }
+
+      // Graph
+      try{
+        let graph;
+        if(USING_API){
+          graph = await fetchJSON(`${API_BASE}/api/v1/graph/parcel/${encodeURIComponent(parcelId)}`);
+        } else {
+          // Build a tiny local graph from parcel_views.json (best-effort)
+          const v = (await fetchJSON('./parcel_views.json'))[parcelId] || {};
+          const nid = id => id.replace(/\s+/g,'_');
+          const nodes = [{ id: nid(parcelId), name: parcelId, label:'Parcel' }];
+          const links = [];
+
+          if(v.titleNumber){
+            nodes.push({ id:nid('T_'+v.titleNumber), name:'T-'+v.titleNumber, label:'Title' });
+            links.push({ source:nid(parcelId), target:nid('T_'+v.titleNumber), type:'HAS_TITLE' });
+          }
+          (v.owners||[]).forEach((o,i)=>{
+            const oid = nid('Owner_'+(o.name||('O'+i)));
+            nodes.push({ id:oid, name:o.name||('Owner '+i), label:'Owner' });
+            links.push({ source:nid('T_'+v.titleNumber||'Title'), target:oid, type:'OWNED_BY' });
+          });
+          (v.rrrs||[]).slice(0,1).forEach((r,i)=>{
+            const rid = nid('RRR_'+(r.type||i));
+            nodes.push({ id:rid, name:(r.type||'RRR'), label:'RRR' });
+            links.push({ source:nid(parcelId), target:rid, type:'HAS_RRR' });
+          });
+          (v.zoning?[v.zoning]:v.zonings||[]).forEach((z,i)=>{
+            const zid = nid('Z_'+(z.code||i));
+            nodes.push({ id:zid, name:(z.code||'Zoning'), label:'Zoning' });
+            links.push({ source:nid(parcelId), target:zid, type:'HAS_ZONING' });
+          });
+          if(v.plan){
+            const pid = nid('Plan_'+v.plan);
+            nodes.push({ id:pid, name:'Plan '+v.plan, label:'Plan' });
+            links.push({ source:nid(parcelId), target:pid, type:'HAS_PLAN' });
+          }
+          if(v.assessment){
+            const aid = nid('A_'+(v.assessment.number||''));
+            nodes.push({ id:aid, name:(v.assessment.number||'Assessment'), label:'Assessment' });
+            links.push({ source:nid(parcelId), target:aid, type:'HAS_ASSESSMENT' });
+          }
+          graph = { nodes, links };
+        }
+        drawGraph(graph);
+      }catch(err){
+        console.error('graph error', err);
+        drawGraph({nodes:[],links:[]});
+      }
+    }
+
+    // ---------------------- init ------------------------
+    loadParcelsAndBuild().then(()=>{
+      // Optionally preselect first parcel
+      const first = $('parcelSelect').options[1]?.value;
+      if(first) showParcel(first, {centerOnMap:false});
+    }).catch(err=>console.error(err));
   </script>
 </body>
 </html>
