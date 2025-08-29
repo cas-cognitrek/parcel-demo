@@ -23,51 +23,12 @@ def norm_pid(pid: str) -> str:
     digits = re.sub(r"\D+", "", pid)
     return digits or pid
 
-# ----- Cypher fragments with PID fallback across common property names -----
-MATCH_PARCEL_FLEX = """
-MATCH (p:Parcel)
-WHERE
-  p.id IN [$pid_raw, $pid_dashless] OR
-  p.parcelId IN [$pid_raw, $pid_dashless] OR
-  p.PID IN [$pid_raw, $pid_dashless] OR
-  p.pid IN [$pid_raw, $pid_dashless] OR
-  replace(p.id, '-', '') = $pid_dashless OR
-  replace(coalesce(p.parcelId, ''), '-', '') = $pid_dashless OR
-  replace(coalesce(p.PID, ''), '-', '') = $pid_dashless OR
-  replace(coalesce(p.pid, ''), '-', '') = $pid_dashless
-RETURN p
-LIMIT 1
-"""
-
-DETAILS_EXPAND = """
-WITH p
-OPTIONAL MATCH (p)-[:HAS_TITLE]->(t:Title)
-OPTIONAL MATCH (p)-[:OWNED_BY]->(o:Owner)
-OPTIONAL MATCH (p)-[:HAS_RRR]->(r:RRR)
-OPTIONAL MATCH (p)-[:HAS_ZONING]->(z:Zoning)
-OPTIONAL MATCH (p)-[:HAS_PLAN]->(sp:SurveyPlan)
-OPTIONAL MATCH (p)-[:HAS_ASSESSMENT]->(a:Assessment)
-RETURN p, t, collect(DISTINCT o) as owners, collect(DISTINCT r) as rrrs, z, sp, a
-"""
-
-GRAPH_EXPAND = """
-WITH p
-OPTIONAL MATCH (p)-[:HAS_TITLE]->(t:Title)
-OPTIONAL MATCH (p)-[:OWNED_BY]->(o:Owner)
-OPTIONAL MATCH (p)-[:HAS_RRR]->(r:RRR)
-OPTIONAL MATCH (p)-[:HAS_ZONING]->(z:Zoning)
-OPTIONAL MATCH (p)-[:HAS_PLAN]->(sp:SurveyPlan)
-OPTIONAL MATCH (p)-[:HAS_ASSESSMENT]->(a:Assessment)
-RETURN p, collect(DISTINCT t) as titles, collect(DISTINCT o) as owners,
-       collect(DISTINCT r) as rrrs, z, sp, a
-"""
-
-# ----- Health -----
+# ---------- Health ----------
 @app.get("/api/v1/health")
 def health():
     return jsonify({"ok": True})
 
-# ----- List parcels (debug/helper) -----
+# ---------- Helper: list parcel IDs (debug) ----------
 @app.get("/api/v1/parcels")
 def list_parcels():
     limit = int(request.args.get("limit", "100"))
@@ -80,36 +41,55 @@ def list_parcels():
         """, limit=limit).data()
     return jsonify({"parcels": [r["id"] for r in rows if r.get("id")]})
 
-# ----- Parcel details -----
+# ---------- Parcel details (single-query flexible match) ----------
+DETAILS_FLEX = """
+WITH $pid_raw AS pid_raw, $pid_dashless AS pid_dashless
+MATCH (p:Parcel)
+WHERE
+  p.id IN [pid_raw, pid_dashless] OR
+  p.parcelId IN [pid_raw, pid_dashless] OR
+  p.PID IN [pid_raw, pid_dashless] OR
+  p.pid IN [pid_raw, pid_dashless] OR
+  replace(p.id, '-', '') = pid_dashless OR
+  replace(coalesce(p.parcelId, ''), '-', '') = pid_dashless OR
+  replace(coalesce(p.PID, ''), '-', '') = pid_dashless OR
+  replace(coalesce(p.pid, ''), '-', '') = pid_dashless
+OPTIONAL MATCH (p)-[:HAS_TITLE]->(t:Title)
+OPTIONAL MATCH (p)-[:OWNED_BY]->(o:Owner)
+OPTIONAL MATCH (p)-[:HAS_RRR]->(r:RRR)
+OPTIONAL MATCH (p)-[:HAS_ZONING]->(z:Zoning)
+OPTIONAL MATCH (p)-[:HAS_PLAN]->(sp:SurveyPlan)
+OPTIONAL MATCH (p)-[:HAS_ASSESSMENT]->(a:Assessment)
+RETURN p,
+       collect(DISTINCT t)  AS titles,
+       collect(DISTINCT o)  AS owners,
+       collect(DISTINCT r)  AS rrrs,
+       z, sp, a
+LIMIT 1
+"""
+
 @app.get("/api/v1/parcels/<pid>")
 def parcel_details(pid):
     pid_raw = (pid or "").strip()
     pid_dashless = norm_pid(pid_raw)
-
     with driver.session() as ses:
-        # Find the parcel using flexible pid matching
-        p_rec = ses.run(MATCH_PARCEL_FLEX, pid_raw=pid_raw, pid_dashless=pid_dashless).single()
-        if not p_rec:
-            # Optional: log for troubleshooting
+        rec = ses.run(DETAILS_FLEX, pid_raw=pid_raw, pid_dashless=pid_dashless).single()
+        if not rec:
             app.logger.warning(f"Parcel not found for pid_raw='{pid_raw}', pid_dashless='{pid_dashless}'")
             return jsonify({"error": "not_found", "pid": pid_raw}), 404
 
-        # Expand details
-        rec = ses.run(DETAILS_EXPAND, pid_raw=pid_raw, pid_dashless=pid_dashless, p=p_rec["p"]).single()
-        p, t, owners, rrrs, z, sp, a = rec["p"], rec["t"], rec["owners"], rec["rrrs"], rec["z"], rec["sp"], rec["a"]
-
+        p, titles, owners, rrrs, z, sp, a = rec["p"], rec["titles"], rec["owners"], rec["rrrs"], rec["z"], rec["sp"], rec["a"]
         def node_props(n): return dict(n) if n else {}
 
         payload = {
             "parcel": node_props(p) if p else None,
-            "titles": [ node_props(t) ] if t else [],
-            "owners": [ node_props(o) for o in owners ],
-            "rrrs":   [ node_props(r) for r in rrrs ],
+            "titles": [ node_props(t) for t in titles if t ],
+            "owners": [ node_props(o) for o in owners if o ],
+            "rrrs":   [ node_props(r) for r in rrrs if r ],
             "zonings": [ node_props(z) ] if z else [],
             "plans":   [ node_props(sp) ] if sp else [],
             "assessments": [ node_props(a) ] if a else [],
         }
-
         parcel_props = payload["parcel"] or {}
         payload["parcelId"]   = parcel_props.get("id") or parcel_props.get("parcelId") or parcel_props.get("PID") or parcel_props.get("pid")
         payload["title"]      = payload["titles"][0] if payload["titles"] else None
@@ -121,24 +101,48 @@ def parcel_details(pid):
             mimetype="application/json"
         )
 
-# ----- Parcel graph -----
+# ---------- Parcel graph (single-query flexible match) ----------
+GRAPH_FLEX = """
+WITH $pid_raw AS pid_raw, $pid_dashless AS pid_dashless
+MATCH (p:Parcel)
+WHERE
+  p.id IN [pid_raw, pid_dashless] OR
+  p.parcelId IN [pid_raw, pid_dashless] OR
+  p.PID IN [pid_raw, pid_dashless] OR
+  p.pid IN [pid_raw, pid_dashless] OR
+  replace(p.id, '-', '') = pid_dashless OR
+  replace(coalesce(p.parcelId, ''), '-', '') = pid_dashless OR
+  replace(coalesce(p.PID, ''), '-', '') = pid_dashless OR
+  replace(coalesce(p.pid, ''), '-', '') = pid_dashless
+OPTIONAL MATCH (p)-[:HAS_TITLE]->(t:Title)
+OPTIONAL MATCH (p)-[:OWNED_BY]->(o:Owner)
+OPTIONAL MATCH (p)-[:HAS_RRR]->(r:RRR)
+OPTIONAL MATCH (p)-[:HAS_ZONING]->(z:Zoning)
+OPTIONAL MATCH (p)-[:HAS_PLAN]->(sp:SurveyPlan)
+OPTIONAL MATCH (p)-[:HAS_ASSESSMENT]->(a:Assessment)
+RETURN p,
+       collect(DISTINCT t) AS titles,
+       collect(DISTINCT o) AS owners,
+       collect(DISTINCT r) AS rrrs,
+       z, sp, a
+LIMIT 1
+"""
+
 @app.get("/api/v1/graph/parcel/<pid>")
 def parcel_graph(pid):
     pid_raw = (pid or "").strip()
     pid_dashless = norm_pid(pid_raw)
-
     with driver.session() as ses:
-        p_rec = ses.run(MATCH_PARCEL_FLEX, pid_raw=pid_raw, pid_dashless=pid_dashless).single()
-        if not p_rec:
+        rec = ses.run(GRAPH_FLEX, pid_raw=pid_raw, pid_dashless=pid_dashless).single()
+        if not rec:
             app.logger.warning(f"Graph: parcel not found for pid_raw='{pid_raw}', pid_dashless='{pid_dashless}'")
             return jsonify({"nodes": [], "edges": []})
 
-        rec = ses.run(GRAPH_EXPAND, pid_raw=pid_raw, pid_dashless=pid_dashless, p=p_rec["p"]).single()
         p = rec["p"]
         titles, owners, rrrs, z, sp, a = rec["titles"], rec["owners"], rec["rrrs"], rec["z"], rec["sp"], rec["a"]
 
-        nodes = [{"id": p.get("id") or p.get("parcelId") or p.get("PID") or p.get("pid"),
-                  "type": "Parcel", "label": f"Parcel {p.get('id') or p.get('parcelId') or p.get('PID') or p.get('pid')}"}]
+        root_id = (p.get("id") or p.get("parcelId") or p.get("PID") or p.get("pid"))
+        nodes = [{"id": root_id, "type": "Parcel", "label": f"Parcel {root_id}"}]
         edges = []
 
         def add_node(n, typ, label_key="name"):
@@ -148,23 +152,23 @@ def parcel_graph(pid):
             nodes.append({"id": str(nid), "type": typ, "label": str(lbl)})
             return str(nid)
 
-        for t in titles:
+        for t in titles or []:
             tid = add_node(t, "Title", "number")
-            if tid: edges.append({"source": nodes[0]["id"], "target": tid, "type": "HAS_TITLE"})
-        for o in owners:
+            if tid: edges.append({"source": root_id, "target": tid, "type": "HAS_TITLE"})
+        for o in owners or []:
             oid = add_node(o, "Owner", "name")
-            if oid: edges.append({"source": nodes[0]["id"], "target": oid, "type": "OWNED_BY"})
-        for r in rrrs:
+            if oid: edges.append({"source": root_id, "target": oid, "type": "OWNED_BY"})
+        for r in rrrs or []:
             rid = add_node(r, "RRR", "type")
-            if rid: edges.append({"source": nodes[0]["id"], "target": rid, "type": "HAS_RRR"})
+            if rid: edges.append({"source": root_id, "target": rid, "type": "HAS_RRR"})
         if z:
             zid = add_node(z, "Zoning", "name")
-            if zid: edges.append({"source": nodes[0]["id"], "target": zid, "type":"HAS_ZONING"})
+            if zid: edges.append({"source": root_id, "target": zid, "type":"HAS_ZONING"})
         if sp:
             spid = add_node(sp, "SurveyPlan", "number")
-            if spid: edges.append({"source": nodes[0]["id"], "target": spid, "type":"HAS_PLAN"})
+            if spid: edges.append({"source": root_id, "target": spid, "type":"HAS_PLAN"})
         if a:
             aid = add_node(a, "Assessment", "value")
-            if aid: edges.append({"source": nodes[0]["id"], "target": aid, "type":"HAS_ASSESSMENT"})
+            if aid: edges.append({"source": root_id, "target": aid, "type":"HAS_ASSESSMENT"})
 
         return jsonify({"nodes": nodes, "edges": edges})
