@@ -1,294 +1,119 @@
-import os
-from typing import Any, Dict, List, Optional
-
-from flask import Flask, jsonify, request
+import os, json, datetime
+from flask import Flask, jsonify
 from flask_cors import CORS
-from neo4j import GraphDatabase, basic_auth
-from neo4j.time import Date, DateTime, Time, Duration
-try:
-    # neo4j >=5.x
-    from neo4j.spatial import Point
-except Exception:
-    Point = None  # fallback if the driver variant doesn't expose spatial
+from neo4j import GraphDatabase
 
-# ------------------------------------------------------------------------------
-# Configuration
-# ------------------------------------------------------------------------------
-
-NEO4J_URI = os.getenv("NEO4J_URI", "").strip()
-NEO4J_USER = os.getenv("NEO4J_USER", "").strip()
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "").strip()
+NEO4J_URI      = os.getenv("NEO4J_URI",      "neo4j+s://YOUR_AURA_OR_RENDER")
+NEO4J_USER     = os.getenv("NEO4J_USER",     "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 
 app = Flask(__name__)
 CORS(app)
 
-_driver = None  # lazy-initialized Neo4j driver
+driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
+def to_jsonable(o):
+    if isinstance(o, (datetime.date, datetime.datetime)):
+        return o.isoformat()
+    return o
 
-# ------------------------------------------------------------------------------
-# JSON coercion (fix: TypeError: Object of type Date is not JSON serializable)
-# ------------------------------------------------------------------------------
+DETAILS_CYPHER = """
+MATCH (p:Parcel {id: $pid})
+OPTIONAL MATCH (p)-[:HAS_TITLE]->(t:Title)
+OPTIONAL MATCH (p)-[:OWNED_BY]->(o:Owner)
+OPTIONAL MATCH (p)-[:HAS_RRR]->(r:RRR)
+OPTIONAL MATCH (p)-[:HAS_ZONING]->(z:Zoning)
+OPTIONAL MATCH (p)-[:HAS_PLAN]->(sp:SurveyPlan)
+OPTIONAL MATCH (p)-[:HAS_ASSESSMENT]->(a:Assessment)
+RETURN p, t, collect(DISTINCT o) as owners, collect(DISTINCT r) as rrrs, z, sp, a
+"""
 
-def _coerce_neo4j_value(v):
-    # Temporal
-    if isinstance(v, (Date, DateTime, Time)):
-        return v.iso_format()
-    if isinstance(v, Duration):
-        return str(v)
+GRAPH_CYPHER = """
+MATCH (p:Parcel {id:$pid})
+OPTIONAL MATCH (p)-[e1:HAS_TITLE]->(t:Title)
+OPTIONAL MATCH (p)-[e2:OWNED_BY]->(o:Owner)
+OPTIONAL MATCH (p)-[e3:HAS_RRR]->(r:RRR)
+OPTIONAL MATCH (p)-[e4:HAS_ZONING]->(z:Zoning)
+OPTIONAL MATCH (p)-[e5:HAS_PLAN]->(sp:SurveyPlan)
+OPTIONAL MATCH (p)-[e6:HAS_ASSESSMENT]->(a:Assessment)
+RETURN p, collect(DISTINCT t) as titles, collect(DISTINCT o) as owners,
+       collect(DISTINCT r) as rrrs, z, sp, a
+"""
 
-    # Spatial
-    if Point and isinstance(v, Point):
-        out = {"srid": v.srid, "x": v.x, "y": v.y}
-        if hasattr(v, "z"):
-            out["z"] = v.z
-        return out
+@app.get("/api/v1/parcels/<pid>")
+def parcel_details(pid):
+    pid = (pid or "").strip()
+    with driver.session() as ses:
+        rec = ses.run(DETAILS_CYPHER, pid=pid).single()
+        if not rec:
+            return jsonify({"error":"not_found", "pid": pid}), 404
 
-    # Collections / nested
-    if isinstance(v, list):
-        return [_coerce_neo4j_value(x) for x in v]
-    if isinstance(v, tuple):
-        return tuple(_coerce_neo4j_value(x) for x in v)
-    if isinstance(v, dict):
-        return {k: _coerce_neo4j_value(val) for k, val in v.items()}
+        p, t, owners, rrrs, z, sp, a = rec["p"], rec["t"], rec["owners"], rec["rrrs"], rec["z"], rec["sp"], rec["a"]
 
-    return v
+        def node_props(n): return dict(n) if n else {}
 
+        payload = {
+            "parcel": node_props(p) if p else None,
+            "titles": [ node_props(t) ] if t else [],
+            "owners": [ node_props(o) for o in owners ],
+            "rrrs":   [ node_props(r) for r in rrrs ],
+            "zonings": [ node_props(z) ] if z else [],
+            "plans":   [ node_props(sp) ] if sp else [],
+            "assessments": [ node_props(a) ] if a else [],
+        }
 
-def send_json(data: Any, status: int = 200):
-    return jsonify(_coerce_neo4j_value(data)), status
+        parcel_props = payload["parcel"] or {}
+        payload["parcelId"]   = parcel_props.get("id") or parcel_props.get("parcelId")
+        payload["title"]      = payload["titles"][0] if payload["titles"] else None
+        payload["surveyPlan"] = payload["plans"][0] if payload["plans"] else None
+        payload["assessment"] = payload["assessments"][0] if payload["assessments"] else None
 
+        return app.response_class(
+            response=json.dumps(payload, default=to_jsonable),
+            mimetype="application/json"
+        )
 
-# ------------------------------------------------------------------------------
-# Neo4j helpers
-# ------------------------------------------------------------------------------
+@app.get("/api/v1/graph/parcel/<pid>")
+def parcel_graph(pid):
+    pid = (pid or "").strip()
+    with driver.session() as ses:
+        rec = ses.run(GRAPH_CYPHER, pid=pid).single()
+        if not rec:
+            return jsonify({"nodes":[], "edges":[]})
+        p = rec["p"]
+        titles, owners, rrrs, z, sp, a = rec["titles"], rec["owners"], rec["rrrs"], rec["z"], rec["sp"], rec["a"]
 
-def get_driver():
-    global _driver
-    if _driver is None:
-        if not (NEO4J_URI and NEO4J_USER and NEO4J_PASSWORD):
-            return None
-        auth = basic_auth(NEO4J_USER, NEO4J_PASSWORD)
-        app.logger.info("Initializing Neo4j driver -> %s", NEO4J_URI)
-        _driver = GraphDatabase.driver(NEO4J_URI, auth=auth)
-    return _driver
+        nodes = [{"id": p.get("id"), "type":"Parcel", "label": f"Parcel {p.get('id')}"}]
+        edges = []
 
+        def add_node(n, typ, label_key="name"):
+            if not n: return None
+            nid = n.get("id") or n.get("number") or n.get("name")
+            lbl = n.get(label_key) or n.get("number") or n.get("name") or typ
+            nodes.append({"id": str(nid), "type": typ, "label": lbl})
+            return str(nid)
 
-def ping_neo4j() -> bool:
-    drv = get_driver()
-    if not drv:
-        return False
-    try:
-        with drv.session() as s:
-            s.run("RETURN 1").single()
-        return True
-    except Exception as e:
-        app.logger.warning("Neo4j ping failed: %s", e)
-        return False
+        for t in titles:
+            tid = add_node(t, "Title", "number")
+            if tid: edges.append({"source": p.get("id"), "target": tid, "type": "HAS_TITLE"})
+        for o in owners:
+            oid = add_node(o, "Owner", "name")
+            if oid: edges.append({"source": p.get("id"), "target": oid, "type": "OWNED_BY"})
+        for r in rrrs:
+            rid = add_node(r, "RRR", "type")
+            if rid: edges.append({"source": p.get("id"), "target": rid, "type": "HAS_RRR"})
+        if z:
+            zid = add_node(z, "Zoning", "name")
+            if zid: edges.append({"source": p.get("id"), "target": zid, "type":"HAS_ZONING"})
+        if sp:
+            spid = add_node(sp, "SurveyPlan", "number")
+            if spid: edges.append({"source": p.get("id"), "target": spid, "type":"HAS_PLAN"})
+        if a:
+            aid = add_node(a, "Assessment", "value")
+            if aid: edges.append({"source": p.get("id"), "target": aid, "type":"HAS_ASSESSMENT"})
 
+        return jsonify({"nodes": nodes, "edges": edges})
 
-def node_to_dict(n) -> Optional[Dict[str, Any]]:
-    if n is None:
-        return None
-    node_id = getattr(n, "element_id", None)
-    if node_id is None and hasattr(n, "id"):  # old api fallback
-        node_id = n.id
-    props = {k: _coerce_neo4j_value(v) for k, v in dict(n).items()}
-    return {
-        "id": node_id,
-        "labels": list(n.labels) if hasattr(n, "labels") else [],
-        "properties": props,
-    }
-
-
-# ------------------------------------------------------------------------------
-# Routes
-# ------------------------------------------------------------------------------
-
-@app.route("/health")
+@app.get("/api/v1/health")
 def health():
-    return send_json({"status": "ok"})
-
-
-@app.route("/")
-def root():
-    return send_json({
-        "service": "parcel-backend",
-        "status": "ok",
-        "neo4j_connected": ping_neo4j(),
-        "try": [
-            "/health",
-            "/api/v1/parcels",
-            "/api/v1/parcels/012-345-106",
-            "/api/v1/graph/parcel/012-345-106"
-        ],
-    })
-
-
-@app.route("/api/v1/parcels", methods=["GET"])
-def list_parcels():
-    """
-    Lists parcelId values for the dropdown.
-      ?q=substring  (optional)
-      ?limit=200    (optional)
-    """
-    drv = get_driver()
-    if not drv:
-        return send_json({"parcels": [], "error": "neo4j_not_configured"})
-
-    q = request.args.get("q", "").strip()
-    try:
-        limit = int(request.args.get("limit", "200"))
-    except ValueError:
-        limit = 200
-
-    try:
-        with drv.session() as s:
-            if q:
-                recs = s.run(
-                    """
-                    MATCH (p:Parcel)
-                    WHERE toLower(p.parcelId) CONTAINS toLower($q)
-                    RETURN p.parcelId AS id
-                    ORDER BY id
-                    LIMIT $limit
-                    """,
-                    q=q, limit=limit
-                ).values()
-            else:
-                recs = s.run(
-                    """
-                    MATCH (p:Parcel)
-                    RETURN p.parcelId AS id
-                    ORDER BY id
-                    LIMIT $limit
-                    """,
-                    limit=limit
-                ).values()
-        return send_json({"parcels": [r[0] for r in recs]})
-    except Exception as e:
-        app.logger.exception("list_parcels failed")
-        return send_json({"parcels": [], "error": "server", "message": str(e)}, 500)
-
-
-@app.route("/api/v1/parcels/<parcel_id>", methods=["GET"])
-def get_parcel(parcel_id: str):
-    """
-    Returns a parcel and its related nodes (Title/Owner/Zoning/Assessment/Plan/RRR).
-    Accepts either :SurveyPlan or :Plan labels for plans.
-    """
-    drv = get_driver()
-    if not drv:
-        return send_json({"error": "neo4j_not_configured", "parcelId": parcel_id})
-
-    QUERY = """
-    MATCH (p:Parcel {parcelId:$parcelId})
-    OPTIONAL MATCH (p)-[:HAS_TITLE]->(t:Title)
-    OPTIONAL MATCH (t)-[:OWNED_BY]->(o:Owner)
-    OPTIONAL MATCH (p)-[:HAS_ZONING]->(z:Zoning)
-    OPTIONAL MATCH (p)-[:HAS_ASSESSMENT]->(a:Assessment)
-    OPTIONAL MATCH (p)-[:HAS_PLAN]->(sp)
-    WHERE sp:SurveyPlan OR sp:Plan
-    OPTIONAL MATCH (p)-[:HAS_RRR]->(r:RRR)
-    RETURN
-      p,
-      collect(DISTINCT t)  AS titles,
-      collect(DISTINCT o)  AS owners,
-      collect(DISTINCT z)  AS zonings,
-      collect(DISTINCT a)  AS assessments,
-      collect(DISTINCT sp) AS plans,
-      collect(DISTINCT r)  AS rrrs
-    """
-    try:
-        with drv.session() as s:
-            rec = s.run(QUERY, parcelId=parcel_id).single()
-            if not rec:
-                return send_json({"error": "not_found", "parcelId": parcel_id}, 404)
-
-            payload = {
-                "parcel":      node_to_dict(rec["p"]),
-                "titles":      [node_to_dict(n) for n in rec["titles"]],
-                "owners":      [node_to_dict(n) for n in rec["owners"]],
-                "zoning":      [node_to_dict(n) for n in rec["zonings"]],
-                "assessments": [node_to_dict(n) for n in rec["assessments"]],
-                "plans":       [node_to_dict(n) for n in rec["plans"]],
-                "rrrs":        [node_to_dict(n) for n in rec["rrrs"]],
-            }
-            return send_json(payload)
-    except Exception as e:
-        app.logger.exception("Error fetching parcel %s", parcel_id)
-        return send_json({"error": "server", "message": str(e)}, 500)
-
-
-@app.route("/api/v1/graph/parcel/<parcel_id>", methods=["GET"])
-def graph_for_parcel(parcel_id: str):
-    """
-    Neighborhood graph around a parcel.
-    Returns both 'source/target' and 'start/end' so various FE libs can render.
-    Adds 'title' and 'kind' to nodes for nicer display/coloring.
-    """
-    drv = get_driver()
-    if not drv:
-        return send_json({"nodes": [], "links": [], "error": "neo4j_not_configured"})
-
-    QUERY = """
-    MATCH (p:Parcel {parcelId:$parcelId})
-    OPTIONAL MATCH (p)-[r]-(m)
-    RETURN p, r, m
-    """
-
-    def friendly_title(d: Dict[str, Any]) -> str:
-        labels = d.get("labels", [])
-        props  = d.get("properties", {})
-        for key in ("parcelId", "name", "titleId", "zoningId", "assessmentId", "planId", "id"):
-            if key in props and props[key]:
-                return f"{labels[0] if labels else ''} {props[key]}"
-        return labels[0] if labels else "Node"
-
-    try:
-        with drv.session() as s:
-            rs = s.run(QUERY, parcelId=parcel_id)
-
-            nodes_by_id: Dict[str, Dict[str, Any]] = {}
-            links: List[Dict[str, Any]] = []
-
-            def add_node(n):
-                d = node_to_dict(n)
-                if not d:
-                    return None
-                nid = str(d["id"])
-                if nid not in nodes_by_id:
-                    d["title"] = friendly_title(d)
-                    d["kind"] = d["labels"][0] if d["labels"] else "Node"
-                    nodes_by_id[nid] = d
-                return nid
-
-            for rec in rs:
-                p = rec["p"]
-                pid = add_node(p)
-
-                r = rec["r"]
-                m = rec["m"]
-                if r is not None and m is not None:
-                    mid = add_node(m)
-                    rid = getattr(r, "element_id", None) or getattr(r, "id", None)
-                    links.append({
-                        "id": str(rid),
-                        "type": r.type,
-                        # support both link conventions
-                        "source": pid, "target": mid,
-                        "start":  pid, "end":    mid,
-                        "properties": _coerce_neo4j_value(dict(r)),
-                    })
-
-            return send_json({"nodes": list(nodes_by_id.values()), "links": links})
-    except Exception as e:
-        app.logger.exception("graph_for_parcel error")
-        return send_json({"error": "server", "message": str(e)}, 500)
-
-
-# ------------------------------------------------------------------------------
-# Local dev entrypoint
-# ------------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
+    return jsonify({"ok": True})
