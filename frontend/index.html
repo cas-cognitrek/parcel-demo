@@ -1,202 +1,338 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <title>Parcel Demo</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  <style>
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-    header { padding:10px 14px; border-bottom:1px solid #e5e7eb; display:flex; gap:10px; align-items:center; }
-    #app { display:grid; grid-template-columns: 1fr 340px; grid-template-rows: auto 1fr 280px; height: calc(100vh - 50px); }
-    #toolbar { grid-column: 1 / span 2; display:flex; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid #e5e7eb; }
-    #map { grid-column: 1; grid-row: 2; }
-    #panel { grid-column: 2; grid-row: 2 / span 2; border-left:1px solid #e5e7eb; overflow:auto; padding:12px; }
-    #graph { grid-column: 1; grid-row: 3; border-top:1px solid #e5e7eb; }
-    .lbl { font-size:12px; color:#6b7280; }
-    .val { font-weight:600; }
-    .row { display:grid; grid-template-columns: 110px 1fr; gap:6px; margin:6px 0; }
-    .muted { color:#6b7280; }
-  </style>
+  <meta charset="utf-8" />
+  <title>Parcel Demo — Map + Parcel Details + Graph</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- Load your config first (if present). It's OK if this 404s; we set safe defaults later. -->
-  <script src="config.js"></script>
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- Cytoscape -->
+  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+
+    /* Floating controls (top-left) */
+    #controls {
+      position: absolute; top: 10px; left: 10px; z-index: 1000;
+      background: #fff; border: 1px solid #ddd; border-radius: 8px;
+      padding: 8px 10px; box-shadow: 0 2px 8px rgba(0,0,0,.1);
+      font: 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      display: flex; gap: 8px; align-items: center;
+    }
+    #controls select, #controls button {
+      font: inherit; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff;
+    }
+
+    /* Bottom info panel */
+    #details {
+      position: absolute; left: 0; right: 0; bottom: 0; max-height: 42%;
+      background: rgba(255,255,255,.97); border-top: 2px solid #e5e5e5;
+      padding: 10px; z-index: 900; overflow: auto;
+      font: 14px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    #columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    #parcelPanel { border: 1px solid #e8e8e8; border-radius: 8px; padding: 10px; }
+    #graphPanel  { border: 1px solid #e8e8e8; border-radius: 8px; height: 260px; }
+    @media (max-width: 900px) { #columns { grid-template-columns: 1fr; } }
+  </style>
 </head>
 <body>
-  <header>
-    <strong>Parcel Demo</strong>
-    <span class="muted">Leaflet · Neo4j · Cytoscape</span>
-  </header>
+  <div id="map"></div>
 
-  <div id="app">
-    <div id="toolbar">
-      <label class="lbl" for="parcelSelect">Parcel</label>
-      <select id="parcelSelect"><option value="">Loading parcels…</option></select>
-    </div>
-
-    <div id="map"></div>
-
-    <aside id="panel">
-      <h3>Parcel Details</h3>
-      <div class="row"><div class="lbl">Parcel ID</div><div id="p-id" class="val">—</div></div>
-      <div class="row"><div class="lbl">Legal</div><div id="p-legal">—</div></div>
-      <div class="row"><div class="lbl">Title</div><div id="p-title">—</div></div>
-      <div class="row"><div class="lbl">Owners</div><div id="p-owners">—</div></div>
-      <div class="row"><div class="lbl">RRRs</div><div id="p-rrr">—</div></div>
-      <div class="row"><div class="lbl">Zoning</div><div id="p-zoning">—</div></div>
-      <div class="row"><div class="lbl">Plan</div><div id="p-plan">—</div></div>
-      <div class="row"><div class="lbl">Assessment</div><div id="p-assess">—</div></div>
-    </aside>
-
-    <div id="graph"></div>
+  <div id="controls">
+    <label for="parcelSelect">Parcel:</label>
+    <select id="parcelSelect"><option value="">— choose —</option></select>
+    <button id="btnFit" type="button">Fit</button>
+    <span id="sourceBadge" style="color:#666;font-size:12px;">Init…</span>
   </div>
 
-  <!-- Libraries -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.umd.js"></script>
+  <div id="details">
+    <div id="columns">
+      <div id="parcelPanel">Select a parcel on the map or choose from the dropdown.</div>
+      <div id="graphPanel"></div>
+    </div>
+  </div>
 
-  <!-- App script -->
+  <!-- Must define window.API_BASE ("" for local JSON; or your Render backend URL) -->
+  <script src="config.js"></script>
+
   <script>
-    // ---------- Safe defaults even if config.js is missing ----------
-    // If your backend is on Render, replace YOUR-BACKEND with the actual service name.
-    const API_BASE = (window.API_BASE && String(window.API_BASE)) || "https://YOUR-BACKEND.onrender.com/api/v1";
-    const GEOJSON_URL = (window.GEOJSON_URL && String(window.GEOJSON_URL)) || "synthetic_parcels.geojson";
-    const USING_API = (typeof window.USING_API === "boolean") ? window.USING_API : true;
+  // ---------------- Config / DOM ----------------
+  const API_BASE = (window.API_BASE || "").trim();
+  const USING_API = !!API_BASE;
 
-    // ---------- Map ----------
-    const map = L.map('map').setView([49.25, -123.12], 11);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OSM' }).addTo(map);
+  const $select      = document.getElementById('parcelSelect');
+  const $btnFit      = document.getElementById('btnFit');
+  const $parcelPanel = document.getElementById('parcelPanel');
+  const $graphHost   = document.getElementById('graphPanel');
+  const $badge       = document.getElementById('sourceBadge');
 
-    const parcelSelect = document.getElementById("parcelSelect");
+  $badge.textContent = USING_API ? 'Live API' : 'Local JSON';
 
-    function setText(id, text){
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.textContent = (text && String(text).trim()) || '—';
-    }
+  // ---------------- Map ----------------
+  const map = L.map('map');
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+  // Center over Metro Vancouver, BC
+  map.setView([49.25, -123.12], 11);
+  map.doubleClickZoom.disable(); // avoid accidental zoom-in on double-click
 
-    function firstOrNull(arr){ return Array.isArray(arr) && arr.length ? arr[0] : null; }
-    function prop(o, k){
-      if (!o) return null;
-      const nested = o.properties && (o.properties[k] ?? o.properties[k?.toLowerCase?.()]);
-      return (nested !== undefined) ? nested : o[k];
-    }
-    function pickAny(o, keys){
-      for (const k of keys){
-        const v = prop(o, k);
-        if (v !== undefined && v !== null && v !== '') return v;
-      }
-      return null;
-    }
-
-    function loadDetails(id){
-      if (USING_API){
-        fetch(`${API_BASE}/parcels/${encodeURIComponent(id)}`)
-          .then(r => {
-            if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-            return r.json();
-          })
-          .then(d => {
-            const parcelNode = d.parcel || null;
-
-            const pid = pickAny(parcelNode, ['parcelId','id']) || d.parcelId || id;
-            setText('p-id', pid);
-
-            const legal = pickAny(parcelNode, ['legalDescription','legal','legaldescription']);
-            setText('p-legal', legal);
-
-            const titleNode = firstOrNull(d.titles);
-            const titleTxt = pickAny(titleNode, ['number','id','name','titleId']);
-            setText('p-title', titleTxt);
-
-            const owners = (d.owners || []).map(o => pickAny(o, ['name','ownerName'])).filter(Boolean).join(', ');
-            setText('p-owners', owners);
-
-            const rrrs = (d.rrrs || []).map(r => pickAny(r, ['type','rrrType','name'])).filter(Boolean).join(', ');
-            setText('p-rrr', rrrs);
-
-            const zoningList = Array.isArray(d.zonings) ? d.zonings : (d.zoning ? [d.zoning] : []);
-            const zonings = zoningList.map(z => pickAny(z, ['code','name','zoningCode','zoning'])).filter(Boolean).join(', ');
-            setText('p-zoning', zonings);
-
-            const planNode = firstOrNull(d.plans);
-            const planTxt = pickAny(planNode, ['number','name','id','planId']);
-            setText('p-plan', planTxt);
-
-            const assessNode = firstOrNull(d.assessments);
-            const assessTxt = pickAny(assessNode, ['value','amount','year','id']);
-            setText('p-assess', assessTxt);
-
-            renderGraph(id);
-          })
-          .catch(err => {
-            console.error('Details load failed:', err);
-            setText('p-id', id);
-          });
-      } else {
-        // Local-only mode
-        setText('p-id', id);
-      }
-    }
-
-    function renderGraph(id){
-      fetch(`${API_BASE}/graph/parcel/${encodeURIComponent(id)}`)
-        .then(r => r.json())
-        .then(g => {
-          const nodes = (g.nodes || []).map(n => ({ data: { id: n.id, label: n.label || n.id } }));
-          const edges = (g.edges || []).map(e => ({ data: { id: `${e.source}-${e.type}-${e.target}`, source: e.source, target: e.target, label: e.type } }));
-
-          cytoscape({
-            container: document.getElementById('graph'),
-            elements: { nodes, edges },
-            layout: { name: 'cose', animate: false },
-            style: [
-              { selector: 'node', style: { 'label':'data(label)', 'background-color':'#60a5fa', 'shape':'round-rectangle', 'text-valign':'center', 'text-wrap':'wrap' } },
-              { selector: 'edge', style: { 'label':'data(label)', 'curve-style':'bezier', 'target-arrow-shape':'triangle', 'width':1 } },
-            ]
-          });
-        })
-        .catch(err => console.error('Graph load failed:', err));
-    }
-
-    // Load GeoJSON and populate dropdown
-    fetch(GEOJSON_URL)
-      .then(r => {
-        if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-        return r.json();
-      })
-      .then(gj => {
-        const geoLayer = L.geoJSON(gj, {
-          style: { color:'#2563eb', weight:1, fillOpacity:0.2 },
-          onEachFeature: (f, layer) => {
-            const p = f.properties || {};
-            const pid = p.parcelid || p.parcelId || p.id || p.PID;
-            if (pid) {
-              layer.on('click', () => { parcelSelect.value = pid; loadDetails(pid); });
-            }
-          }
-        }).addTo(map);
-        try { map.fitBounds(geoLayer.getBounds()); } catch {}
-
-        const options = (gj.features || [])
-          .map(feat => {
-            const p = (feat && feat.properties) || {};
-            return p.parcelid || p.parcelId || p.id || p.PID;
-          })
-          .filter(Boolean)
-          .sort((a,b)=>String(a).localeCompare(String(b)));
-
-        parcelSelect.innerHTML = `<option value="">Select a parcel…</option>` + options.map(o=>`<option value="${o}">${o}</option>`).join("");
-      })
-      .catch(err => {
-        console.error('GeoJSON load failed:', err);
-        parcelSelect.innerHTML = `<option value="">GeoJSON failed to load</option>`;
+  const parcelsLayer = L.geoJSON(null, {
+    onEachFeature: (feature, layer) => {
+      layer.on('click', () => {
+        const id = feature.properties?.parcelId || feature.properties?.id;
+        if (id) selectParcel(id, true);
       });
+    },
+    style: { color: '#3388ff', weight: 2, fillColor: '#3388ff', fillOpacity: .15 }
+  }).addTo(map);
 
-    parcelSelect.addEventListener("change", e => {
-      const id = e.target.value;
-      if (id) loadDetails(id);
+  $btnFit.addEventListener('click', () => {
+    try { map.fitBounds(parcelsLayer.getBounds(), { padding: [20,20] }); } catch(e) {}
+  });
+
+  // ---------------- GeoJSON hygiene ----------------
+  // Ensure properties.parcelId exists and auto-fix swapped lat/lon if polygons cluster near (0,0)
+  function ensureParcelIds(gj){
+    (gj.features||[]).forEach(f=>{
+      f.properties = f.properties || {};
+      f.properties.parcelId = f.properties.parcelId
+        || f.properties.id || f.id
+        || f.properties.PARCEL_ID || f.properties.ParcelID || "";
     });
+  }
+  function maybeSwapLonLat(gj){
+    const sample = [];
+    (gj.features||[]).forEach(f=>{
+      const g=f.geometry; if(!g) return;
+      const coords = g.type==="Polygon" ? g.coordinates.flat(2)
+                   : g.type==="MultiPolygon" ? g.coordinates.flat(3) : [];
+      for (let i=0; i<coords.length && sample.length<60; i+=Math.max(1,Math.floor(coords.length/10))){
+        const p=coords[i]; if(Array.isArray(p)&&typeof p[0]==="number") sample.push(p);
+      }
+    });
+    if(!sample.length) return;
+    let suspicious=0;
+    for(const [x,y] of sample){
+      const lon=x, lat=y;
+      if (Math.abs(lat)>90 || (Math.abs(lon)<5 && Math.abs(lat)<5)) suspicious++;
+    }
+    if (suspicious >= sample.length*0.6){
+      const swapAll = arr=>{
+        for(let i=0;i<arr.length;i++){
+          const v=arr[i];
+          if(Array.isArray(v) && typeof v[0]==='number'){ arr[i]=[v[1],v[0]]; }
+          else if(Array.isArray(v)) swapAll(v);
+        }
+      };
+      (gj.features||[]).forEach(f=>{
+        const g=f.geometry; if(!g) return;
+        if (g.type==="Polygon" || g.type==="MultiPolygon") swapAll(g.coordinates);
+      });
+    }
+  }
+
+  // ---------------- Boot ----------------
+  window.addEventListener('DOMContentLoaded', boot);
+
+  async function boot() {
+    try {
+      if (USING_API) {
+        await loadParcelsFromAPI();
+      } else {
+        await loadParcelsFromLocalViews();
+      }
+      await loadGeojsonLocal();  // draw polygons (from local geojson)
+    } catch (e) {
+      console.error('Boot error', e);
+    }
+  }
+
+  // Dropdown ids
+  async function loadParcelsFromAPI() {
+    const res = await fetch(`${API_BASE}/api/v1/parcels?_=${Date.now()}`, { cache: 'no-store' });
+    const data = await res.json();
+    const ids = data.parcels || [];
+    fillDropdown(ids);
+  }
+  async function loadParcelsFromLocalViews() {
+    const res = await fetch('parcel_views.json', { cache: 'no-store' });
+    const data = await res.json();
+    fillDropdown(Object.keys(data || {}));
+  }
+  function fillDropdown(ids) {
+    $select.innerHTML = '<option value="">— choose —</option>';
+    ids.sort().forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = id;
+      $select.appendChild(opt);
+    });
+  }
+
+  // Polygons from local geojson (make sure it has BC coordinates!)
+  async function loadGeojsonLocal() {
+    const res = await fetch('synthetic_parcels.geojson', { cache:'no-store' });
+    const gj = await res.json();
+    ensureParcelIds(gj);
+    maybeSwapLonLat(gj);
+
+    parcelsLayer.clearLayers();
+    parcelsLayer.addData(gj);
+    try { map.fitBounds(parcelsLayer.getBounds(), { padding:[20,20] }); } catch {}
+  }
+
+  // ---------------- Select (from dropdown or map) ----------------
+  $select.addEventListener('change', ev => {
+    const id = ev.target.value;
+    if (id) selectParcel(id, false);
+  });
+
+  async function selectParcel(id, fromMap) {
+    if (!id) return;
+    if (fromMap) $select.value = id;
+    highlightParcelOnMap(id);
+    await loadParcelDetails(id);
+    await loadParcelGraph(id);
+  }
+
+  function highlightParcelOnMap(id) {
+    parcelsLayer.eachLayer(layer => {
+      const fid = layer.feature?.properties?.parcelId || layer.feature?.properties?.id;
+      if (!fid) return;
+      const isHit = (String(fid) === String(id));
+      layer.setStyle({
+        color: isHit ? '#ef476f' : '#3388ff',
+        weight: isHit ? 3 : 2,
+        fillColor: '#3388ff',
+        fillOpacity: isHit ? .22 : .15
+      });
+    });
+    // IMPORTANT: no map.fitBounds() here — keep user’s current zoom/position
+  }
+
+  // ---------------- Details ----------------
+  async function loadParcelDetails(id) {
+    try {
+      if (USING_API) {
+        const url = `${API_BASE}/api/v1/parcels/${encodeURIComponent(id)}?_=${Date.now()}`;
+        const d = await (await fetch(url, { cache: 'no-store' })).json();
+        renderDetails(d);
+        $badge.textContent = 'Live API';
+      } else {
+        const views = await (await fetch('parcel_views.json', { cache: 'no-store' })).json();
+        renderLocalDetails(id, views[id] || {});
+        $badge.textContent = 'Local JSON';
+      }
+    } catch (e) {
+      console.error('parcel details error', e);
+      $parcelPanel.innerHTML = '<em>Failed to load parcel details.</em>';
+    }
+  }
+
+  function renderDetails(d) {
+    const p = d.parcel?.properties || d.parcel || {};
+    const titles = (d.titles || []).map(x => x.properties?.titleId || x.properties?.id || x.id).filter(Boolean);
+    const owners = (d.owners || []).map(x => x.properties?.name || x.properties?.id || x.id).filter(Boolean);
+    const rrrs   = (d.rrrs   || []).map(x => x.properties?.type || x.properties?.kind || x.properties?.name || x.id).filter(Boolean);
+    const zones  = (d.zoning || d.zonings || []).map(x => x.properties?.zoningId || x.properties?.zoneId || x.properties?.name || x.id).filter(Boolean);
+    const plans  = (d.plans  || []).map(x => x.properties?.planId || x.properties?.name || x.id).filter(Boolean);
+    const assess = (d.assessments || []).map(x => x.properties?.assessmentId || x.properties?.id || x.id).filter(Boolean);
+
+    $parcelPanel.innerHTML = `
+      <div><b>Parcel:</b> ${p.parcelId || '—'}</div>
+      <div><b>Legal:</b> ${p.legalDescription || '—'}</div>
+      <hr/>
+      <div><b>Title</b><br/>${titles.join('<br/>') || '—'}</div>
+      <div><b>Owner(s)</b><br/>${owners.join('<br/>') || '—'}</div>
+      <div><b>RRR</b><br/>${rrrs.join('<br/>') || '—'}</div>
+      <div><b>Zoning</b><br/>${zones.join('<br/>') || '—'}</div>
+      <div><b>Survey Plan</b><br/>${plans.join('<br/>') || '—'}</div>
+      <div><b>Assessment</b><br/>${assess.join('<br/>') || '—'}</div>
+    `;
+  }
+
+  function renderLocalDetails(id, dv) {
+    $parcelPanel.innerHTML = `
+      <div><b>Parcel:</b> ${id}</div>
+      <div><b>Title:</b> ${dv.titleId || '—'}</div>
+      <div><b>Owner(s):</b> ${(dv.owners || []).join(', ') || '—'}</div>
+      <div><b>RRR:</b> ${(dv.rrr || []).join(', ') || '—'}</div>
+      <div><b>Zoning:</b> ${dv.zoning || '—'}</div>
+      <div><b>Survey Plan:</b> ${dv.planId || '—'}</div>
+      <div><b>Assessment:</b> ${dv.assessmentId || '—'}</div>
+    `;
+  }
+
+  // ---------------- Graph ----------------
+  let cy = null;
+  function ensureCy() {
+    if (cy) return cy;
+    cy = cytoscape({
+      container: $graphHost,
+      style: [
+        { selector: 'node[kind = "Parcel"]',      style: { 'background-color': '#ef476f', 'label': 'data(title)', 'font-size': 11, 'text-wrap':'wrap','text-max-width': 140 } },
+        { selector: 'node[kind = "Owner"]',       style: { 'background-color': '#80ed99', 'label': 'data(title)' } },
+        { selector: 'node[kind = "Title"]',       style: { 'background-color': '#2ec4b6', 'label': 'data(title)' } },
+        { selector: 'node[kind = "RRR"]',         style: { 'background-color': '#ffd166', 'label': 'data(title)' } },
+        { selector: 'node[kind = "Zoning"]',      style: { 'background-color': '#f4a261', 'label': 'data(title)' } },
+        { selector: 'node[kind = "Assessment"]',  style: { 'background-color': '#6c8ae4', 'label': 'data(title)' } },
+        { selector: 'node[kind = "SurveyPlan"]',  style: { 'background-color': '#90caf9', 'label': 'data(title)' } },
+        // Fallback
+        { selector: 'node', style: { 'background-color': '#6c8ae4', 'label': 'data(title)', 'font-size': 10, 'text-wrap':'wrap','text-max-width': 140 } },
+        { selector: 'edge', style: { 'width': 2, 'line-color': '#9aa0a6', 'target-arrow-shape':'triangle', 'target-arrow-color':'#9aa0a6', 'curve-style': 'bezier', 'label':'data(type)', 'font-size': 8 } }
+      ]
+    });
+    return cy;
+  }
+
+  async function loadParcelGraph(id) {
+    const c = ensureCy();
+    if (!id) { c.elements().remove(); return; }
+    if (!USING_API) { c.elements().remove(); return; }
+
+    const url = `${API_BASE}/api/v1/graph/parcel/${encodeURIComponent(id)}?_=${Date.now()}`;
+    try {
+      const g = await (await fetch(url, { cache: 'no-store' })).json();
+
+      const nodes = (g.nodes || []).map(n => ({
+        group: 'nodes',
+        data: {
+          id: String(n.id),
+          title: n.title ||
+                 n.properties?.parcelId || n.properties?.name ||
+                 n.properties?.titleId || n.properties?.planId ||
+                 n.properties?.zoningId || n.properties?.assessmentId ||
+                 n.id || 'Node',
+          // prefer explicit n.kind; else first label from n.labels; else "Node"
+          kind: n.kind || (Array.isArray(n.labels) && n.labels.length ? n.labels[0] : 'Node')
+        }
+      }));
+
+      const edges = (g.links || g.edges || []).map(e => ({
+        group: 'edges',
+        data: {
+          id: e.id ? String(e.id) : `${e.source ?? e.start}->${e.target ?? e.end}:${e.type || ''}`,
+          source: String(e.source ?? e.start),
+          target: String(e.target ?? e.end),
+          type: e.type || ''
+        }
+      }));
+
+      c.elements().remove();
+      c.add(nodes);
+      c.add(edges);
+      c.layout({ name: 'cose', animate: true }).run();
+      if (c.elements().length) c.fit(c.elements(), 30);
+    } catch (err) {
+      console.error('graph load error', err);
+      c.elements().remove();
+    }
+  }
   </script>
 </body>
 </html>
