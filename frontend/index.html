@@ -14,7 +14,8 @@
 
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; }
-    /* Floating controls top-left */
+
+    /* Floating controls (top-left) */
     #controls {
       position: absolute; top: 10px; left: 10px; z-index: 1000;
       background: #fff; border: 1px solid #ddd; border-radius: 8px;
@@ -25,9 +26,10 @@
     #controls select, #controls button {
       font: inherit; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff;
     }
+
     /* Bottom info panel */
     #details {
-      position: absolute; left: 0; right: 0; bottom: 0; max-height: 40%;
+      position: absolute; left: 0; right: 0; bottom: 0; max-height: 42%;
       background: rgba(255,255,255,.97); border-top: 2px solid #e5e5e5;
       padding: 10px; z-index: 900; overflow: auto;
       font: 14px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
@@ -55,11 +57,11 @@
     </div>
   </div>
 
-  <!-- Must define window.API_BASE -->
+  <!-- Must define window.API_BASE ("" for local JSON; or your Render backend URL) -->
   <script src="config.js"></script>
 
   <script>
-  // ---------- Config / DOM ----------
+  // ---------------- Config / DOM ----------------
   const API_BASE = (window.API_BASE || "").trim();
   const USING_API = !!API_BASE;
 
@@ -71,13 +73,14 @@
 
   $badge.textContent = USING_API ? 'Live API' : 'Local JSON';
 
-  // ---------- Map ----------
+  // ---------------- Map ----------------
   const map = L.map('map');
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19, attribution: '&copy; OpenStreetMap'
   }).addTo(map);
   // Center over Metro Vancouver, BC
   map.setView([49.25, -123.12], 11);
+  map.doubleClickZoom.disable(); // avoid accidental zoom-in on double-click
 
   const parcelsLayer = L.geoJSON(null, {
     onEachFeature: (feature, layer) => {
@@ -93,7 +96,48 @@
     try { map.fitBounds(parcelsLayer.getBounds(), { padding: [20,20] }); } catch(e) {}
   });
 
-  // ---------- Boot (load ids + polygons) ----------
+  // ---------------- GeoJSON hygiene ----------------
+  // Ensure properties.parcelId exists and auto-fix swapped lat/lon if polygons cluster near (0,0)
+  function ensureParcelIds(gj){
+    (gj.features||[]).forEach(f=>{
+      f.properties = f.properties || {};
+      f.properties.parcelId = f.properties.parcelId
+        || f.properties.id || f.id
+        || f.properties.PARCEL_ID || f.properties.ParcelID || "";
+    });
+  }
+  function maybeSwapLonLat(gj){
+    const sample = [];
+    (gj.features||[]).forEach(f=>{
+      const g=f.geometry; if(!g) return;
+      const coords = g.type==="Polygon" ? g.coordinates.flat(2)
+                   : g.type==="MultiPolygon" ? g.coordinates.flat(3) : [];
+      for (let i=0; i<coords.length && sample.length<60; i+=Math.max(1,Math.floor(coords.length/10))){
+        const p=coords[i]; if(Array.isArray(p)&&typeof p[0]==="number") sample.push(p);
+      }
+    });
+    if(!sample.length) return;
+    let suspicious=0;
+    for(const [x,y] of sample){
+      const lon=x, lat=y;
+      if (Math.abs(lat)>90 || (Math.abs(lon)<5 && Math.abs(lat)<5)) suspicious++;
+    }
+    if (suspicious >= sample.length*0.6){
+      const swapAll = arr=>{
+        for(let i=0;i<arr.length;i++){
+          const v=arr[i];
+          if(Array.isArray(v) && typeof v[0]==='number'){ arr[i]=[v[1],v[0]]; }
+          else if(Array.isArray(v)) swapAll(v);
+        }
+      };
+      (gj.features||[]).forEach(f=>{
+        const g=f.geometry; if(!g) return;
+        if (g.type==="Polygon" || g.type==="MultiPolygon") swapAll(g.coordinates);
+      });
+    }
+  }
+
+  // ---------------- Boot ----------------
   window.addEventListener('DOMContentLoaded', boot);
 
   async function boot() {
@@ -103,7 +147,7 @@
       } else {
         await loadParcelsFromLocalViews();
       }
-      await loadGeojsonLocal();  // draw polygons (from local geojson for now)
+      await loadGeojsonLocal();  // draw polygons (from local geojson)
     } catch (e) {
       console.error('Boot error', e);
     }
@@ -132,15 +176,17 @@
 
   // Polygons from local geojson (make sure it has BC coordinates!)
   async function loadGeojsonLocal() {
-    const res = await fetch('synthetic_parcels.geojson', { cache: 'no-store' });
+    const res = await fetch('synthetic_parcels.geojson', { cache:'no-store' });
     const gj = await res.json();
+    ensureParcelIds(gj);
+    maybeSwapLonLat(gj);
+
     parcelsLayer.clearLayers();
     parcelsLayer.addData(gj);
-    // If your polygons are in BC, this will frame BC; if they’re near (0,0) it’ll jump to Africa.
-    try { map.fitBounds(parcelsLayer.getBounds(), { padding: [20,20] }); } catch (e) {}
+    try { map.fitBounds(parcelsLayer.getBounds(), { padding:[20,20] }); } catch {}
   }
 
-  // ---------- Select (from dropdown or map) ----------
+  // ---------------- Select (from dropdown or map) ----------------
   $select.addEventListener('change', ev => {
     const id = ev.target.value;
     if (id) selectParcel(id, false);
@@ -165,13 +211,11 @@
         fillColor: '#3388ff',
         fillOpacity: isHit ? .22 : .15
       });
-      if (isHit && layer.getBounds) {
-        map.fitBounds(layer.getBounds(), { padding: [28,28] });
-      }
     });
+    // IMPORTANT: no map.fitBounds() here — keep user’s current zoom/position
   }
 
-  // ---------- Details ----------
+  // ---------------- Details ----------------
   async function loadParcelDetails(id) {
     try {
       if (USING_API) {
@@ -224,16 +268,23 @@
     `;
   }
 
-  // ---------- Graph ----------
+  // ---------------- Graph ----------------
   let cy = null;
   function ensureCy() {
     if (cy) return cy;
     cy = cytoscape({
       container: $graphHost,
       style: [
-        { selector: 'node[kind="Parcel"]', style: { 'background-color': '#ef476f', 'label': 'data(title)', 'font-size': 11 } },
-        { selector: 'node', style: { 'background-color': '#6c8ae4', 'label': 'data(title)', 'font-size': 10, 'text-wrap': 'wrap', 'text-max-width': 120 } },
-        { selector: 'edge', style: { 'width': 2, 'line-color': '#999', 'target-arrow-shape': 'triangle', 'target-arrow-color': '#999', 'curve-style': 'bezier', 'label': 'data(type)', 'font-size': 8 } }
+        { selector: 'node[kind = "Parcel"]',      style: { 'background-color': '#ef476f', 'label': 'data(title)', 'font-size': 11, 'text-wrap':'wrap','text-max-width': 140 } },
+        { selector: 'node[kind = "Owner"]',       style: { 'background-color': '#80ed99', 'label': 'data(title)' } },
+        { selector: 'node[kind = "Title"]',       style: { 'background-color': '#2ec4b6', 'label': 'data(title)' } },
+        { selector: 'node[kind = "RRR"]',         style: { 'background-color': '#ffd166', 'label': 'data(title)' } },
+        { selector: 'node[kind = "Zoning"]',      style: { 'background-color': '#f4a261', 'label': 'data(title)' } },
+        { selector: 'node[kind = "Assessment"]',  style: { 'background-color': '#6c8ae4', 'label': 'data(title)' } },
+        { selector: 'node[kind = "SurveyPlan"]',  style: { 'background-color': '#90caf9', 'label': 'data(title)' } },
+        // Fallback
+        { selector: 'node', style: { 'background-color': '#6c8ae4', 'label': 'data(title)', 'font-size': 10, 'text-wrap':'wrap','text-max-width': 140 } },
+        { selector: 'edge', style: { 'width': 2, 'line-color': '#9aa0a6', 'target-arrow-shape':'triangle', 'target-arrow-color':'#9aa0a6', 'curve-style': 'bezier', 'label':'data(type)', 'font-size': 8 } }
       ]
     });
     return cy;
@@ -257,7 +308,8 @@
                  n.properties?.titleId || n.properties?.planId ||
                  n.properties?.zoningId || n.properties?.assessmentId ||
                  n.id || 'Node',
-          kind: n.kind || (Array.isArray(n.labels) ? n.labels[0] : 'Node')
+          // prefer explicit n.kind; else first label from n.labels; else "Node"
+          kind: n.kind || (Array.isArray(n.labels) && n.labels.length ? n.labels[0] : 'Node')
         }
       }));
 
