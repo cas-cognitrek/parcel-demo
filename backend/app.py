@@ -23,6 +23,32 @@ def norm_pid(pid: str) -> str:
     digits = re.sub(r"\D+", "", pid)
     return digits or pid
 
+def node_to_props(n):
+    """Safely convert neo4j Node-like to a plain dict of JSON-safe values."""
+    if n is None:
+        return None
+    # Most neo4j Node objects implement .keys() and .get()
+    try:
+        out = {}
+        for k in n.keys():
+            v = n.get(k)
+            # Simple JSON-safe normalization
+            if isinstance(v, (datetime.date, datetime.datetime)):
+                v = v.isoformat()
+            elif isinstance(v, (list, tuple)):
+                v = [
+                    (vv.isoformat() if isinstance(vv, (datetime.date, datetime.datetime)) else vv)
+                    for vv in v
+                ]
+            out[str(k)] = v
+        return out
+    except Exception:
+        # Fallback: last resort try dict() casting
+        try:
+            return dict(n)
+        except Exception:
+            return None
+
 # ---------- Health ----------
 @app.get("/api/v1/health")
 def health():
@@ -91,24 +117,24 @@ def parcel_details(pid):
         plans       = rec["plans"]       or []
         assessments = rec["assessments"] or []
 
-        def node_props(n): return dict(n) if n else {}
-
+        # Build strictly JSON-safe payload
+        parcel_dict = node_to_props(p) or {}
         payload = {
-            "parcel": node_props(p),
-            "titles": [ node_props(t) for t in titles if t ],
-            "owners": [ node_props(o) for o in owners if o ],
-            "rrrs":   [ node_props(r) for r in rrrs if r ],
-            "zonings": [ node_props(z) for z in zonings if z ],
-            "plans":   [ node_props(sp) for sp in plans if sp ],
-            "assessments": [ node_props(a) for a in assessments if a ],
+            "parcel": parcel_dict,
+            "titles": [ node_to_props(t) for t in titles if t ],
+            "owners": [ node_to_props(o) for o in owners if o ],
+            "rrrs":   [ node_to_props(r) for r in rrrs if r ],
+            "zonings": [ node_to_props(z) for z in zonings if z ],
+            "plans":   [ node_to_props(sp) for sp in plans if sp ],
+            "assessments": [ node_to_props(a) for a in assessments if a ],
         }
 
-        parcel_props = payload["parcel"]
-        payload["parcelId"]   = parcel_props.get("id") or parcel_props.get("parcelId") or parcel_props.get("PID") or parcel_props.get("pid")
-        payload["title"]      = payload["titles"][0] if payload["titles"] else None
-        payload["surveyPlan"] = payload["plans"][0] if payload["plans"] else None
-        payload["assessment"] = payload["assessments"][0] if payload["assessments"] else None
+        payload["parcelId"]   = parcel_dict.get("id") or parcel_dict.get("parcelId") or parcel_dict.get("PID") or parcel_dict.get("pid")
+        payload["title"]      = (payload["titles"][0] if payload["titles"] else None)
+        payload["surveyPlan"] = (payload["plans"][0] if payload["plans"] else None)
+        payload["assessment"] = (payload["assessments"][0] if payload["assessments"] else None)
 
+        # Return explicitly via Response to apply to_jsonable to any dates (if any)
         return app.response_class(
             response=json.dumps(payload, default=to_jsonable),
             mimetype="application/json"
@@ -149,17 +175,20 @@ def parcel_graph(pid):
         plans       = rec["plans"]       or []
         assessments = rec["assessments"] or []
 
-        root_id = (p.get("id") or p.get("parcelId") or p.get("PID") or p.get("pid"))
+        root_props = node_to_props(p) or {}
+        root_id = (root_props.get("id") or root_props.get("parcelId") or root_props.get("PID") or root_props.get("pid"))
         nodes = [{"id": root_id, "type": "Parcel", "label": f"Parcel {root_id}"}]
         edges = []
 
         def add_node(n, typ, label_key="name"):
             """Return node id if added; skip nodes without any usable id/label."""
-            if not n: return None
-            nid = n.get("id") or n.get("number") or n.get("name") or n.get("value")
+            props = node_to_props(n)
+            if not props:
+                return None
+            nid = props.get("id") or props.get("number") or props.get("name") or props.get("value")
             if nid is None or str(nid).strip() == "":
                 return None
-            lbl = n.get(label_key) or n.get("number") or n.get("name") or n.get("value") or typ
+            lbl = props.get(label_key) or props.get("number") or props.get("name") or props.get("value") or typ
             nodes.append({"id": str(nid), "type": typ, "label": str(lbl)})
             return str(nid)
 
