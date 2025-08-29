@@ -18,6 +18,9 @@
     .row { display:grid; grid-template-columns: 110px 1fr; gap:6px; margin:6px 0; }
     .muted { color:#6b7280; }
   </style>
+
+  <!-- Load your config first (if present). It's OK if this 404s; we set safe defaults later. -->
+  <script src="config.js"></script>
 </head>
 <body>
   <header>
@@ -48,11 +51,19 @@
     <div id="graph"></div>
   </div>
 
-  <script src="config.js"></script>
+  <!-- Libraries -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.umd.js"></script>
 
+  <!-- App script -->
   <script>
+    // ---------- Safe defaults even if config.js is missing ----------
+    // If your backend is on Render, replace YOUR-BACKEND with the actual service name.
+    const API_BASE = (window.API_BASE && String(window.API_BASE)) || "https://YOUR-BACKEND.onrender.com/api/v1";
+    const GEOJSON_URL = (window.GEOJSON_URL && String(window.GEOJSON_URL)) || "synthetic_parcels.geojson";
+    const USING_API = (typeof window.USING_API === "boolean") ? window.USING_API : true;
+
+    // ---------- Map ----------
     const map = L.map('map').setView([49.25, -123.12], 11);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OSM' }).addTo(map);
 
@@ -68,7 +79,7 @@
     function prop(o, k){
       if (!o) return null;
       const nested = o.properties && (o.properties[k] ?? o.properties[k?.toLowerCase?.()]);
-      return nested !== undefined ? nested : o[k];
+      return (nested !== undefined) ? nested : o[k];
     }
     function pickAny(o, keys){
       for (const k of keys){
@@ -79,8 +90,8 @@
     }
 
     function loadDetails(id){
-      if (typeof USING_API !== 'undefined' && USING_API){
-        fetch(`${API_BASE}/api/v1/parcels/${encodeURIComponent(id)}`)
+      if (USING_API){
+        fetch(`${API_BASE}/parcels/${encodeURIComponent(id)}`)
           .then(r => {
             if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
             return r.json();
@@ -116,25 +127,26 @@
             const assessTxt = pickAny(assessNode, ['value','amount','year','id']);
             setText('p-assess', assessTxt);
 
-            if (typeof renderGraph === 'function') renderGraph(id);
+            renderGraph(id);
           })
           .catch(err => {
             console.error('Details load failed:', err);
             setText('p-id', id);
           });
       } else {
+        // Local-only mode
         setText('p-id', id);
       }
     }
 
     function renderGraph(id){
-      fetch(`${API_BASE}/api/v1/graph/parcel/${encodeURIComponent(id)}`)
+      fetch(`${API_BASE}/graph/parcel/${encodeURIComponent(id)}`)
         .then(r => r.json())
         .then(g => {
-          const nodes = g.nodes.map(n => ({ data: { id: n.id, label: n.label || n.id } }));
-          const edges = g.edges.map(e => ({ data: { id: `${e.source}-${e.type}-${e.target}`, source: e.source, target: e.target, label: e.type } }));
+          const nodes = (g.nodes || []).map(n => ({ data: { id: n.id, label: n.label || n.id } }));
+          const edges = (g.edges || []).map(e => ({ data: { id: `${e.source}-${e.type}-${e.target}`, source: e.source, target: e.target, label: e.type } }));
 
-          const cy = cytoscape({
+          cytoscape({
             container: document.getElementById('graph'),
             elements: { nodes, edges },
             layout: { name: 'cose', animate: false },
@@ -143,24 +155,48 @@
               { selector: 'edge', style: { 'label':'data(label)', 'curve-style':'bezier', 'target-arrow-shape':'triangle', 'width':1 } },
             ]
           });
-        });
+        })
+        .catch(err => console.error('Graph load failed:', err));
     }
 
-    fetch(GEOJSON_URL).then(r => r.json()).then(gj => {
-      const geoLayer = L.geoJSON(gj, {
-        style: { color:'#2563eb', weight:1, fillOpacity:0.2 },
-        onEachFeature: (f, layer) => {
-          const pid = f.properties.parcelid || f.properties.parcelId || f.properties.id;
-          layer.on('click', () => { parcelSelect.value = pid; loadDetails(pid); });
-        }
-      }).addTo(map);
-      map.fitBounds(geoLayer.getBounds());
+    // Load GeoJSON and populate dropdown
+    fetch(GEOJSON_URL)
+      .then(r => {
+        if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+        return r.json();
+      })
+      .then(gj => {
+        const geoLayer = L.geoJSON(gj, {
+          style: { color:'#2563eb', weight:1, fillOpacity:0.2 },
+          onEachFeature: (f, layer) => {
+            const p = f.properties || {};
+            const pid = p.parcelid || p.parcelId || p.id || p.PID;
+            if (pid) {
+              layer.on('click', () => { parcelSelect.value = pid; loadDetails(pid); });
+            }
+          }
+        }).addTo(map);
+        try { map.fitBounds(geoLayer.getBounds()); } catch {}
 
-      const options = gj.features.map(feat => feat.properties.parcelid || feat.properties.parcelId || feat.properties.id).filter(Boolean).sort();
-      parcelSelect.innerHTML = `<option value="">Select a parcel…</option>` + options.map(o=>`<option value="${o}">${o}</option>`).join("");
+        const options = (gj.features || [])
+          .map(feat => {
+            const p = (feat && feat.properties) || {};
+            return p.parcelid || p.parcelId || p.id || p.PID;
+          })
+          .filter(Boolean)
+          .sort((a,b)=>String(a).localeCompare(String(b)));
+
+        parcelSelect.innerHTML = `<option value="">Select a parcel…</option>` + options.map(o=>`<option value="${o}">${o}</option>`).join("");
+      })
+      .catch(err => {
+        console.error('GeoJSON load failed:', err);
+        parcelSelect.innerHTML = `<option value="">GeoJSON failed to load</option>`;
+      });
+
+    parcelSelect.addEventListener("change", e => {
+      const id = e.target.value;
+      if (id) loadDetails(id);
     });
-
-    parcelSelect.addEventListener("change", e => loadDetails(e.target.value));
   </script>
 </body>
 </html>
