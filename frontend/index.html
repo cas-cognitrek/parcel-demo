@@ -407,51 +407,70 @@
     }
   }
 
+
   function localGraphFromView(view, parcelId){
-    // Minimal nodes from local view data
-    const nodes = [{ id: parcelId, name: parcelId, label:'Parcel' }];
-    const links = [];
+  const nodes = [{ id: parcelId, name: parcelId, label:'Parcel' }];
+  const links = [];
 
-    const title = (view?.titles && view.titles[0]) || view?.title;
-    if(title){
-      nodes.push({ id: title.id || 'T', name: title.id || 'Title', label:'Title' });
-      links.push({ source: parcelId, target: title.id || 'T', type:'HAS_TITLE' });
-
-      if(Array.isArray(title.owners)){
-        title.owners.forEach((o, i)=>{
-          const oid = o.name || `Owner${i+1}`;
-          nodes.push({ id: oid, name: oid, label:'Owner' });
-          links.push({ source: title.id || 'T', target: oid, type:'OWNED_BY' });
-        });
-      }
+  // helper to add node once
+  const seen = new Set();
+  function addNode(id, name, label){
+    if(!id) return;
+    if(!seen.has(id)){
+      nodes.push({ id, name: name || id, label });
+      seen.add(id);
     }
-
-    (view?.zonings || []).slice(0,1).forEach(z=>{
-      const id = z.code || z.name || 'Z';
-      nodes.push({ id, name:id, label:'Zoning' });
-      links.push({ source: parcelId, target:id, type:'HAS_ZONING' });
-    });
-
-    (view?.plans || []).slice(0,1).forEach(p=>{
-      const id = p.number || p.name || 'P';
-      nodes.push({ id, name:id, label:'Plan' });
-      links.push({ source: parcelId, target:id, type:'HAS_PLAN' });
-    });
-
-    (view?.rrrs || []).slice(0,1).forEach(r=>{
-      const id = r.type || r.name || 'RRR';
-      nodes.push({ id, name:id, label:'RRR' });
-      links.push({ source: parcelId, target:id, type:'HAS_RRR' });
-    });
-
-    if(view?.assessment?.id){
-      const id = view.assessment.id;
-      nodes.push({ id, name:id, label:'Assessment' });
-      links.push({ source: parcelId, target:id, type:'HAS_ASSESSMENT' });
-    }
-
-    return { nodes, links };
   }
+  function addLink(src, dst, type){
+    if(src && dst) links.push({ source: src, target: dst, type });
+  }
+
+  // Title & Owners
+  const titles = Array.isArray(view?.titles) ? view.titles : (view?.title ? [view.title] : []);
+  titles.forEach((t, ti)=>{
+    const tid = t.id || `Title_${ti+1}`;
+    addNode(tid, t.id || 'Title', 'Title');
+    addLink(parcelId, tid, 'HAS_TITLE');
+
+    const owners = Array.isArray(t.owners) ? t.owners : [];
+    owners.forEach((o, oi)=>{
+      const oid = o.name || `Owner_${ti+1}_${oi+1}`;
+      addNode(oid, oid, 'Owner');
+      addLink(tid, oid, 'OWNED_BY');
+    });
+  });
+
+  // Zoning
+  (Array.isArray(view?.zonings) ? view.zonings : []).forEach((z, zi)=>{
+    const zid = z.code || z.name || `Z_${zi+1}`;
+    addNode(zid, zid, 'Zoning');
+    addLink(parcelId, zid, 'HAS_ZONING');
+  });
+
+  // Plans
+  (Array.isArray(view?.plans) ? view.plans : (view?.plan ? [view.plan] : [])).forEach((p, pi)=>{
+    const pid = p.number || p.name || `P_${pi+1}`;
+    addNode(pid, pid, 'Plan');
+    addLink(parcelId, pid, 'HAS_PLAN');
+  });
+
+  // RRRs
+  (Array.isArray(view?.rrrs) ? view.rrrs : []).forEach((r, ri)=>{
+    const rid = r.type || r.name || `RRR_${ri+1}`;
+    addNode(rid, rid, 'RRR');
+    addLink(parcelId, rid, 'HAS_RRR');
+  });
+
+  // Assessment
+  const assess = view?.assessment || (Array.isArray(view?.assessments) ? view.assessments[0] : null);
+  if(assess?.id){
+    addNode(assess.id, assess.id, 'Assessment');
+    addLink(parcelId, assess.id, 'HAS_ASSESSMENT');
+  }
+
+  return { nodes, links };
+}
+
 
   // --------------------------
   // UI wiring
