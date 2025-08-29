@@ -4,49 +4,38 @@
   <meta charset="utf-8" />
   <title>Parcel Demo — Map + Parcel Details + Graph</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+
   <!-- Leaflet -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    crossorigin=""
-  />
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    crossorigin=""
-  ></script>
-  <!-- Cytoscape for mini-graph -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- Cytoscape -->
   <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+
   <style>
-    html, body, #map {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-    }
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    /* Floating controls top-left */
     #controls {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: white;
-      padding: 6px 10px;
-      border-radius: 6px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-      z-index: 1000;
-      font-family: sans-serif;
+      position: absolute; top: 10px; left: 10px; z-index: 1000;
+      background: #fff; border: 1px solid #ddd; border-radius: 8px;
+      padding: 8px 10px; box-shadow: 0 2px 8px rgba(0,0,0,.1);
+      font: 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      display: flex; gap: 8px; align-items: center;
     }
+    #controls select, #controls button {
+      font: inherit; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff;
+    }
+    /* Bottom info panel */
     #details {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      max-height: 40%;
-      background: rgba(255,255,255,0.95);
-      overflow: auto;
-      border-top: 2px solid #ccc;
-      padding: 10px;
-      font-family: sans-serif;
+      position: absolute; left: 0; right: 0; bottom: 0; max-height: 40%;
+      background: rgba(255,255,255,.97); border-top: 2px solid #e5e5e5;
+      padding: 10px; z-index: 900; overflow: auto;
+      font: 14px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     }
-    #parcelPanel { margin-bottom: 12px; }
-    #graphPanel { width: 100%; height: 240px; border: 1px solid #ccc; }
+    #columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    #parcelPanel { border: 1px solid #e8e8e8; border-radius: 8px; padding: 10px; }
+    #graphPanel  { border: 1px solid #e8e8e8; border-radius: 8px; height: 260px; }
+    @media (max-width: 900px) { #columns { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -55,63 +44,80 @@
   <div id="controls">
     <label for="parcelSelect">Parcel:</label>
     <select id="parcelSelect"><option value="">— choose —</option></select>
-    <button id="btnFit">Fit</button>
+    <button id="btnFit" type="button">Fit</button>
+    <span id="sourceBadge" style="color:#666;font-size:12px;">Init…</span>
   </div>
 
   <div id="details">
-    <div id="parcelPanel">Select a parcel to see details here.</div>
-    <div id="graphPanel"></div>
+    <div id="columns">
+      <div id="parcelPanel">Select a parcel on the map or choose from the dropdown.</div>
+      <div id="graphPanel"></div>
+    </div>
   </div>
 
-  <!-- Config must define window.API_BASE -->
+  <!-- Must define window.API_BASE -->
   <script src="config.js"></script>
 
   <script>
+  // ---------- Config / DOM ----------
   const API_BASE = (window.API_BASE || "").trim();
   const USING_API = !!API_BASE;
-  const $select = document.getElementById("parcelSelect");
-  const $parcelPanel = document.getElementById("parcelPanel");
-  const $graphHost = document.getElementById("graphPanel");
-  const $btnFit = document.getElementById("btnFit");
 
+  const $select      = document.getElementById('parcelSelect');
+  const $btnFit      = document.getElementById('btnFit');
+  const $parcelPanel = document.getElementById('parcelPanel');
+  const $graphHost   = document.getElementById('graphPanel');
+  const $badge       = document.getElementById('sourceBadge');
+
+  $badge.textContent = USING_API ? 'Live API' : 'Local JSON';
+
+  // ---------- Map ----------
   const map = L.map('map');
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap'
+    maxZoom: 19, attribution: '&copy; OpenStreetMap'
   }).addTo(map);
+  // Center over Metro Vancouver, BC
   map.setView([49.25, -123.12], 11);
 
-  let parcelsLayer = L.geoJSON(null, {
+  const parcelsLayer = L.geoJSON(null, {
     onEachFeature: (feature, layer) => {
       layer.on('click', () => {
         const id = feature.properties?.parcelId || feature.properties?.id;
         if (id) selectParcel(id, true);
       });
     },
-    style: { color: '#3388ff', weight: 2, fillOpacity: 0.15 }
+    style: { color: '#3388ff', weight: 2, fillColor: '#3388ff', fillOpacity: .15 }
   }).addTo(map);
 
   $btnFit.addEventListener('click', () => {
     try { map.fitBounds(parcelsLayer.getBounds(), { padding: [20,20] }); } catch(e) {}
   });
 
+  // ---------- Boot (load ids + polygons) ----------
+  window.addEventListener('DOMContentLoaded', boot);
+
   async function boot() {
-    if (USING_API) {
-      await loadParcelsFromAPI();
-      await loadGeojsonLocal();
-    } else {
-      await loadParcelsFromLocalViews();
-      await loadGeojsonLocal();
+    try {
+      if (USING_API) {
+        await loadParcelsFromAPI();
+      } else {
+        await loadParcelsFromLocalViews();
+      }
+      await loadGeojsonLocal();  // draw polygons (from local geojson for now)
+    } catch (e) {
+      console.error('Boot error', e);
     }
   }
 
+  // Dropdown ids
   async function loadParcelsFromAPI() {
-    const res = await fetch(`${API_BASE}/api/v1/parcels?_=${Date.now()}`);
+    const res = await fetch(`${API_BASE}/api/v1/parcels?_=${Date.now()}`, { cache: 'no-store' });
     const data = await res.json();
-    fillDropdown(data.parcels || []);
+    const ids = data.parcels || [];
+    fillDropdown(ids);
   }
   async function loadParcelsFromLocalViews() {
-    const res = await fetch('parcel_views.json');
+    const res = await fetch('parcel_views.json', { cache: 'no-store' });
     const data = await res.json();
     fillDropdown(Object.keys(data || {}));
   }
@@ -123,76 +129,158 @@
       $select.appendChild(opt);
     });
   }
+
+  // Polygons from local geojson (make sure it has BC coordinates!)
   async function loadGeojsonLocal() {
-    const res = await fetch('synthetic_parcels.geojson');
+    const res = await fetch('synthetic_parcels.geojson', { cache: 'no-store' });
     const gj = await res.json();
     parcelsLayer.clearLayers();
     parcelsLayer.addData(gj);
-    map.fitBounds(parcelsLayer.getBounds(), { padding: [20,20] });
+    // If your polygons are in BC, this will frame BC; if they’re near (0,0) it’ll jump to Africa.
+    try { map.fitBounds(parcelsLayer.getBounds(), { padding: [20,20] }); } catch (e) {}
   }
 
-  $select.addEventListener('change', ev => selectParcel(ev.target.value, false));
+  // ---------- Select (from dropdown or map) ----------
+  $select.addEventListener('change', ev => {
+    const id = ev.target.value;
+    if (id) selectParcel(id, false);
+  });
 
   async function selectParcel(id, fromMap) {
+    if (!id) return;
     if (fromMap) $select.value = id;
-    highlightParcel(id);
+    highlightParcelOnMap(id);
     await loadParcelDetails(id);
     await loadParcelGraph(id);
   }
-  function highlightParcel(id) {
+
+  function highlightParcelOnMap(id) {
     parcelsLayer.eachLayer(layer => {
       const fid = layer.feature?.properties?.parcelId || layer.feature?.properties?.id;
       if (!fid) return;
-      const isHit = String(fid) === String(id);
-      layer.setStyle({ color: isHit ? '#EF476F' : '#3388ff', weight: isHit ? 3 : 2 });
+      const isHit = (String(fid) === String(id));
+      layer.setStyle({
+        color: isHit ? '#ef476f' : '#3388ff',
+        weight: isHit ? 3 : 2,
+        fillColor: '#3388ff',
+        fillOpacity: isHit ? .22 : .15
+      });
+      if (isHit && layer.getBounds) {
+        map.fitBounds(layer.getBounds(), { padding: [28,28] });
+      }
     });
   }
 
+  // ---------- Details ----------
   async function loadParcelDetails(id) {
-    if (!id) return;
-    if (USING_API) {
-      const d = await (await fetch(`${API_BASE}/api/v1/parcels/${encodeURIComponent(id)}?_=${Date.now()}`)).json();
-      renderDetails(d);
-    } else {
-      const views = await (await fetch('parcel_views.json')).json();
-      renderLocalDetails(id, views[id] || {});
+    try {
+      if (USING_API) {
+        const url = `${API_BASE}/api/v1/parcels/${encodeURIComponent(id)}?_=${Date.now()}`;
+        const d = await (await fetch(url, { cache: 'no-store' })).json();
+        renderDetails(d);
+        $badge.textContent = 'Live API';
+      } else {
+        const views = await (await fetch('parcel_views.json', { cache: 'no-store' })).json();
+        renderLocalDetails(id, views[id] || {});
+        $badge.textContent = 'Local JSON';
+      }
+    } catch (e) {
+      console.error('parcel details error', e);
+      $parcelPanel.innerHTML = '<em>Failed to load parcel details.</em>';
     }
   }
+
   function renderDetails(d) {
-    const p = d.parcel?.properties || {};
+    const p = d.parcel?.properties || d.parcel || {};
+    const titles = (d.titles || []).map(x => x.properties?.titleId || x.properties?.id || x.id).filter(Boolean);
+    const owners = (d.owners || []).map(x => x.properties?.name || x.properties?.id || x.id).filter(Boolean);
+    const rrrs   = (d.rrrs   || []).map(x => x.properties?.type || x.properties?.kind || x.properties?.name || x.id).filter(Boolean);
+    const zones  = (d.zoning || d.zonings || []).map(x => x.properties?.zoningId || x.properties?.zoneId || x.properties?.name || x.id).filter(Boolean);
+    const plans  = (d.plans  || []).map(x => x.properties?.planId || x.properties?.name || x.id).filter(Boolean);
+    const assess = (d.assessments || []).map(x => x.properties?.assessmentId || x.properties?.id || x.id).filter(Boolean);
+
     $parcelPanel.innerHTML = `
-      <b>Parcel:</b> ${p.parcelId || '—'}<br/>
-      <b>Legal:</b> ${p.legalDescription || '—'}<br/>
+      <div><b>Parcel:</b> ${p.parcelId || '—'}</div>
+      <div><b>Legal:</b> ${p.legalDescription || '—'}</div>
+      <hr/>
+      <div><b>Title</b><br/>${titles.join('<br/>') || '—'}</div>
+      <div><b>Owner(s)</b><br/>${owners.join('<br/>') || '—'}</div>
+      <div><b>RRR</b><br/>${rrrs.join('<br/>') || '—'}</div>
+      <div><b>Zoning</b><br/>${zones.join('<br/>') || '—'}</div>
+      <div><b>Survey Plan</b><br/>${plans.join('<br/>') || '—'}</div>
+      <div><b>Assessment</b><br/>${assess.join('<br/>') || '—'}</div>
     `;
   }
+
   function renderLocalDetails(id, dv) {
-    $parcelPanel.innerHTML = `<b>Parcel:</b> ${id}<br/>Title: ${dv.titleId || '—'}`;
+    $parcelPanel.innerHTML = `
+      <div><b>Parcel:</b> ${id}</div>
+      <div><b>Title:</b> ${dv.titleId || '—'}</div>
+      <div><b>Owner(s):</b> ${(dv.owners || []).join(', ') || '—'}</div>
+      <div><b>RRR:</b> ${(dv.rrr || []).join(', ') || '—'}</div>
+      <div><b>Zoning:</b> ${dv.zoning || '—'}</div>
+      <div><b>Survey Plan:</b> ${dv.planId || '—'}</div>
+      <div><b>Assessment:</b> ${dv.assessmentId || '—'}</div>
+    `;
   }
 
+  // ---------- Graph ----------
   let cy = null;
   function ensureCy() {
     if (cy) return cy;
-    cy = cytoscape({ container: $graphHost, style: [
-      { selector: 'node', style: { 'background-color': '#6c8ae4', 'label': 'data(title)', 'font-size': 10 } },
-      { selector: 'edge', style: { 'width': 2, 'line-color': '#999', 'target-arrow-shape': 'triangle', 'target-arrow-color': '#999', 'curve-style': 'bezier', 'label': 'data(type)', 'font-size': 8 } }
-    ]});
+    cy = cytoscape({
+      container: $graphHost,
+      style: [
+        { selector: 'node[kind="Parcel"]', style: { 'background-color': '#ef476f', 'label': 'data(title)', 'font-size': 11 } },
+        { selector: 'node', style: { 'background-color': '#6c8ae4', 'label': 'data(title)', 'font-size': 10, 'text-wrap': 'wrap', 'text-max-width': 120 } },
+        { selector: 'edge', style: { 'width': 2, 'line-color': '#999', 'target-arrow-shape': 'triangle', 'target-arrow-color': '#999', 'curve-style': 'bezier', 'label': 'data(type)', 'font-size': 8 } }
+      ]
+    });
     return cy;
   }
 
   async function loadParcelGraph(id) {
     const c = ensureCy();
-    if (!id || !USING_API) { c.elements().remove(); return; }
-    const g = await (await fetch(`${API_BASE}/api/v1/graph/parcel/${encodeURIComponent(id)}?_=${Date.now()}`)).json();
-    const nodes = (g.nodes || []).map(n => ({ group: 'nodes', data: { id: String(n.id), title: n.properties?.parcelId || n.properties?.name || n.id } }));
-    const edges = (g.links || []).map(e => ({ group: 'edges', data: { id: e.id || `${e.source}->${e.target}`, source: String(e.source), target: String(e.target), type: e.type || '' } }));
-    c.elements().remove();
-    c.add(nodes);
-    c.add(edges);
-    c.layout({ name: 'cose', animate: true }).run();
-    if (c.elements().length) c.fit(c.elements(), 30);
-  }
+    if (!id) { c.elements().remove(); return; }
+    if (!USING_API) { c.elements().remove(); return; }
 
-  window.addEventListener('DOMContentLoaded', boot);
+    const url = `${API_BASE}/api/v1/graph/parcel/${encodeURIComponent(id)}?_=${Date.now()}`;
+    try {
+      const g = await (await fetch(url, { cache: 'no-store' })).json();
+
+      const nodes = (g.nodes || []).map(n => ({
+        group: 'nodes',
+        data: {
+          id: String(n.id),
+          title: n.title ||
+                 n.properties?.parcelId || n.properties?.name ||
+                 n.properties?.titleId || n.properties?.planId ||
+                 n.properties?.zoningId || n.properties?.assessmentId ||
+                 n.id || 'Node',
+          kind: n.kind || (Array.isArray(n.labels) ? n.labels[0] : 'Node')
+        }
+      }));
+
+      const edges = (g.links || g.edges || []).map(e => ({
+        group: 'edges',
+        data: {
+          id: e.id ? String(e.id) : `${e.source ?? e.start}->${e.target ?? e.end}:${e.type || ''}`,
+          source: String(e.source ?? e.start),
+          target: String(e.target ?? e.end),
+          type: e.type || ''
+        }
+      }));
+
+      c.elements().remove();
+      c.add(nodes);
+      c.add(edges);
+      c.layout({ name: 'cose', animate: true }).run();
+      if (c.elements().length) c.fit(c.elements(), 30);
+    } catch (err) {
+      console.error('graph load error', err);
+      c.elements().remove();
+    }
+  }
   </script>
 </body>
 </html>
