@@ -9,7 +9,7 @@
     :root { --border:#e5e7eb; --muted:#6b7280; --ok:#16a34a; --bad:#dc2626; --warn:#d97706; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
     header { padding:10px 14px; border-bottom:1px solid var(--border); display:flex; gap:10px; align-items:center; }
-    #app { display:grid; grid-template-columns: 1fr 340px; grid-template-rows: auto auto 1fr 280px; height: calc(100vh - 50px); }
+    #app { display:grid; grid-template-columns: 1fr 360px; grid-template-rows: auto auto 1fr 320px; height: calc(100vh - 50px); }
     #toolbar { grid-column: 1 / span 2; display:flex; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--border); }
     #statusbar { grid-column: 1 / span 2; padding:6px 14px; font-size:13px; border-bottom:1px solid var(--border); display:flex; gap:14px; align-items:center; }
     #statusbar .pill { padding:2px 8px; border-radius:999px; border:1px solid var(--border); }
@@ -24,9 +24,10 @@
     .val { font-weight:600; }
     .row { display:grid; grid-template-columns: 110px 1fr; gap:6px; margin:6px 0; }
     .muted { color:var(--muted); }
+    select { padding:6px 8px; border:1px solid var(--border); border-radius:6px; }
   </style>
 
-  <!-- Load optional config first. Safe if missing — we set defaults below. -->
+  <!-- Optional app config -->
   <script src="config.js"></script>
 </head>
 <body>
@@ -45,7 +46,7 @@
     <div id="statusbar">
       <span id="pill-backend" class="pill warn">Backend: …</span>
       <span id="pill-geojson" class="pill warn">GeoJSON: …</span>
-      <span id="pill-last" class="pill">Last action: —</span>
+      <span id="pill-last" class="pill">Last: —</span>
       <span id="status-msg" class="msg"></span>
     </div>
 
@@ -152,7 +153,7 @@
       fetchJSON(apiUrl('graph','parcel', encodeURIComponent(id)), 'graph')
         .then(g => {
           const edgesRaw = g.edges || g.links || [];
-          const nodes = (g.nodes || []).map(n => ({ data: { id: n.id, label: n.label || n.id } }));
+          const nodes = (g.nodes || []).map(n => ({ data: { id: n.id, label: n.label || n.id, type: n.type || '' } }));
           const edges = edgesRaw.map(e => ({
             data: { id: `${e.source}-${e.type||e.label||'REL'}-${e.target}`, source: e.source, target: e.target, label: e.type||e.label }
           }));
@@ -162,67 +163,66 @@
             msg('Graph returned no nodes.');
             return;
           }
+
           cytoscape({
-		  container: document.getElementById('graph'),
-		  elements: { nodes, edges },
-		  layout: {
-			name: 'cose',
-			animate: false,
-			padding: 20,
-			nodeRepulsion: 8000,
-			idealEdgeLength: 120
-		  },
-		  style: [
-			{
-			  selector: 'node',
-			  style: {
-				'label': 'data(label)',
-				'text-valign': 'center',
-				'text-halign': 'center',
-				'text-wrap': 'wrap',
-				'text-max-width': 100,
-				'font-size': 10,
-				'shape': 'round-rectangle',
-				'width': 'label',
-				'height': 'label',
-				'padding': '6px',
-				'background-color': '#60a5fa',
-				'color': '#111827'
-			  }
-			},
-			{
-			  selector: 'node[type="Parcel"]',
-			  style: {
-				'background-color': '#2563eb',
-				'shape': 'rectangle',
-				'font-size': 12,
-				'font-weight': 'bold',
-				'color': 'white'
-			  }
-			},
-			{ selector: 'node[type="Title"]',      style: { 'background-color': '#16a34a' } },
-			{ selector: 'node[type="Owner"]',      style: { 'background-color': '#f59e0b' } },
-			{ selector: 'node[type="RRR"]',        style: { 'background-color': '#dc2626' } },
-			{ selector: 'node[type="Zoning"]',     style: { 'background-color': '#9333ea' } },
-			{ selector: 'node[type="SurveyPlan"]', style: { 'background-color': '#0d9488' } },
-			{ selector: 'node[type="Assessment"]', style: { 'background-color': '#6b7280' } },
-
-			{
-			  selector: 'edge',
-			  style: {
-				'label': 'data(label)',
-				'font-size': 9,
-				'color': '#374151',
-				'curve-style': 'bezier',
-				'target-arrow-shape': 'triangle',
-				'target-arrow-color': '#9ca3af',
-				'width': 1,
-				'line-color': '#9ca3af'
-			  }
-			}
-		  ]
-		});
-
+            container: document.getElementById('graph'),
+            elements: { nodes, edges },
+            layout: {
+              name: 'cose',
+              animate: false,
+              padding: 20,
+              nodeRepulsion: 8000,
+              idealEdgeLength: 120
+            },
+            style: [
+              {
+                selector: 'node',
+                style: {
+                  'label': 'data(label)',
+                  'text-valign': 'center',
+                  'text-halign': 'center',
+                  'text-wrap': 'wrap',
+                  'text-max-width': 110,
+                  'font-size': 10,
+                  'shape': 'round-rectangle',
+                  'width': 'label',
+                  'height': 'label',
+                  'padding': '6px',
+                  'background-color': '#60a5fa',
+                  'color': '#111827'
+                }
+              },
+              { selector: 'node[type = "Parcel"]',
+                style: { 'background-color': '#2563eb', 'shape': 'rectangle', 'font-size': 12, 'font-weight': 'bold', 'color': 'white' } },
+              { selector: 'node[type = "Title"]',      style: { 'background-color': '#16a34a' } },
+              { selector: 'node[type = "Owner"]',      style: { 'background-color': '#f59e0b' } },
+              { selector: 'node[type = "RRR"]',        style: { 'background-color': '#dc2626' } },
+              { selector: 'node[type = "Zoning"]',     style: { 'background-color': '#9333ea' } },
+              { selector: 'node[type = "SurveyPlan"]', style: { 'background-color': '#0d9488' } },
+              { selector: 'node[type = "Assessment"]', style: { 'background-color': '#6b7280' } },
+              {
+                selector: 'edge',
+                style: {
+                  'label': 'data(label)',
+                  'font-size': 9,
+                  'color': '#374151',
+                  'curve-style': 'bezier',
+                  'target-arrow-shape': 'triangle',
+                  'target-arrow-color': '#9ca3af',
+                  'width': 1,
+                  'line-color': '#9ca3af'
+                }
+              }
+            ]
+          });
+          setPill(pillLast, 'ok', 'Last: graph ✓');
+          msg('');
+        })
+        .catch(err => {
+          console.error('graph', err);
+          setPill(pillLast, 'bad', 'Last: graph ✗');
+          msg(err.message);
+        });
     }
 
     function loadDetails(id){
