@@ -162,24 +162,67 @@
             msg('Graph returned no nodes.');
             return;
           }
-
           cytoscape({
-            container: document.getElementById('graph'),
-            elements: { nodes, edges },
-            layout: { name: 'cose', animate: false },
-            style: [
-              { selector: 'node', style: { 'label':'data(label)', 'background-color':'#60a5fa', 'shape':'round-rectangle', 'text-valign':'center', 'text-wrap':'wrap' } },
-              { selector: 'edge', style: { 'label':'data(label)', 'curve-style':'bezier', 'target-arrow-shape':'triangle', 'width':1 } },
-            ]
-          });
-          setPill(pillLast, 'ok', 'Last: graph ✓');
-          msg('');
-        })
-        .catch(err => {
-          console.error('graph', err);
-          setPill(pillLast, 'bad', 'Last: graph ✗');
-          msg(err.message);
-        });
+		  container: document.getElementById('graph'),
+		  elements: { nodes, edges },
+		  layout: {
+			name: 'cose',
+			animate: false,
+			padding: 20,
+			nodeRepulsion: 8000,
+			idealEdgeLength: 120
+		  },
+		  style: [
+			{
+			  selector: 'node',
+			  style: {
+				'label': 'data(label)',
+				'text-valign': 'center',
+				'text-halign': 'center',
+				'text-wrap': 'wrap',
+				'text-max-width': 100,
+				'font-size': 10,
+				'shape': 'round-rectangle',
+				'width': 'label',
+				'height': 'label',
+				'padding': '6px',
+				'background-color': '#60a5fa',
+				'color': '#111827'
+			  }
+			},
+			{
+			  selector: 'node[type="Parcel"]',
+			  style: {
+				'background-color': '#2563eb',
+				'shape': 'rectangle',
+				'font-size': 12,
+				'font-weight': 'bold',
+				'color': 'white'
+			  }
+			},
+			{ selector: 'node[type="Title"]',      style: { 'background-color': '#16a34a' } },
+			{ selector: 'node[type="Owner"]',      style: { 'background-color': '#f59e0b' } },
+			{ selector: 'node[type="RRR"]',        style: { 'background-color': '#dc2626' } },
+			{ selector: 'node[type="Zoning"]',     style: { 'background-color': '#9333ea' } },
+			{ selector: 'node[type="SurveyPlan"]', style: { 'background-color': '#0d9488' } },
+			{ selector: 'node[type="Assessment"]', style: { 'background-color': '#6b7280' } },
+
+			{
+			  selector: 'edge',
+			  style: {
+				'label': 'data(label)',
+				'font-size': 9,
+				'color': '#374151',
+				'curve-style': 'bezier',
+				'target-arrow-shape': 'triangle',
+				'target-arrow-color': '#9ca3af',
+				'width': 1,
+				'line-color': '#9ca3af'
+			  }
+			}
+		  ]
+		});
+
     }
 
     function loadDetails(id){
