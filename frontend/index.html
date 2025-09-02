@@ -9,7 +9,8 @@
     :root { --border:#e5e7eb; --muted:#6b7280; --ok:#16a34a; --bad:#dc2626; --warn:#d97706; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
     header { padding:10px 14px; border-bottom:1px solid var(--border); display:flex; gap:10px; align-items:center; }
-    #app { display:grid; grid-template-columns: 1fr 360px; grid-template-rows: auto auto 1fr 320px; height: calc(100vh - 50px); }
+    /* Make the graph much taller: last row ~45vh */
+    #app { display:grid; grid-template-columns: 1fr 360px; grid-template-rows: auto auto 1fr 45vh; height: calc(100vh - 50px); }
     #toolbar { grid-column: 1 / span 2; display:flex; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--border); }
     #statusbar { grid-column: 1 / span 2; padding:6px 14px; font-size:13px; border-bottom:1px solid var(--border); display:flex; gap:14px; align-items:center; }
     #statusbar .pill { padding:2px 8px; border-radius:999px; border:1px solid var(--border); }
@@ -19,7 +20,12 @@
     #statusbar .msg { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     #map { grid-column: 1; grid-row: 3; }
     #panel { grid-column: 2; grid-row: 3 / span 2; border-left:1px solid var(--border); overflow:auto; padding:12px; }
-    #graph { grid-column: 1; grid-row: 4; border-top:1px solid var(--border); }
+    #graphWrap { grid-column: 1; grid-row: 4; border-top:1px solid var(--border); display:flex; gap:10px; align-items:stretch; padding:8px 10px; }
+    #graph { flex:1 1 auto; min-height: 100%; }
+    #legend { width: 220px; border-left:1px dashed var(--border); padding-left:10px; font-size:12px; color:#111827; }
+    #legend h4 { margin:4px 0 8px; font-size:12px; color:#374151; }
+    #legend .item { display:flex; align-items:center; gap:8px; margin:6px 0; }
+    #legend .dot { width:12px; height:12px; border-radius:999px; display:inline-block; }
     .lbl { font-size:12px; color:var(--muted); }
     .val { font-weight:600; }
     .row { display:grid; grid-template-columns: 110px 1fr; gap:6px; margin:6px 0; }
@@ -64,7 +70,19 @@
       <div class="row"><div class="lbl">Assessment</div><div id="p-assess">—</div></div>
     </aside>
 
-    <div id="graph"></div>
+    <div id="graphWrap">
+      <div id="graph"></div>
+      <div id="legend">
+        <h4>Legend</h4>
+        <div class="item"><span class="dot" style="background:#2563eb;border-radius:4px"></span> Parcel (rectangle)</div>
+        <div class="item"><span class="dot" style="background:#16a34a"></span> Title</div>
+        <div class="item"><span class="dot" style="background:#f59e0b"></span> Owner</div>
+        <div class="item"><span class="dot" style="background:#dc2626"></span> RRR</div>
+        <div class="item"><span class="dot" style="background:#9333ea"></span> Zoning</div>
+        <div class="item"><span class="dot" style="background:#0d9488"></span> Survey Plan</div>
+        <div class="item"><span class="dot" style="background:#6b7280"></span> Assessment</div>
+      </div>
+    </div>
   </div>
 
   <!-- Libraries -->
@@ -149,13 +167,17 @@
       }
     }
 
+    // ---- Graph ----
     function renderGraph(id){
       fetchJSON(apiUrl('graph','parcel', encodeURIComponent(id)), 'graph')
         .then(g => {
           const edgesRaw = g.edges || g.links || [];
-          const nodes = (g.nodes || []).map(n => ({ data: { id: n.id, label: n.label || n.id, type: n.type || '' } }));
+          // Ensure each node carries a usable 'type' attribute in data
+          const nodes = (g.nodes || []).map(n => ({
+            data: { id: String(n.id), label: String(n.label || n.id), type: String(n.type || '') }
+          }));
           const edges = edgesRaw.map(e => ({
-            data: { id: `${e.source}-${e.type||e.label||'REL'}-${e.target}`, source: e.source, target: e.target, label: e.type||e.label }
+            data: { id: `${e.source}-${e.type||e.label||'REL'}-${e.target}`, source: String(e.source), target: String(e.target), label: e.type||e.label }
           }));
 
           if (!nodes.length) {
@@ -170,36 +192,51 @@
             layout: {
               name: 'cose',
               animate: false,
-              padding: 20,
-              nodeRepulsion: 8000,
-              idealEdgeLength: 120
+              padding: 30,
+              nodeRepulsion: 9000,
+              idealEdgeLength: 150
             },
             style: [
+              // Default: CIRCLES with small font
               {
                 selector: 'node',
                 style: {
+                  'shape': 'ellipse',
+                  'width': 34,
+                  'height': 34,
+                  'background-color': '#9ca3af',   /* default grey */
                   'label': 'data(label)',
-                  'text-valign': 'center',
-                  'text-halign': 'center',
+                  'font-size': 10,
                   'text-wrap': 'wrap',
                   'text-max-width': 110,
-                  'font-size': 10,
-                  'shape': 'round-rectangle',
-                  'width': 'label',
-                  'height': 'label',
-                  'padding': '6px',
-                  'background-color': '#60a5fa',
-                  'color': '#111827'
+                  'text-valign': 'center',
+                  'text-halign': 'center',
+                  'color': '#111827',
+                  'padding': '4px'
                 }
               },
-              { selector: 'node[type = "Parcel"]',
-                style: { 'background-color': '#2563eb', 'shape': 'rectangle', 'font-size': 12, 'font-weight': 'bold', 'color': 'white' } },
-              { selector: 'node[type = "Title"]',      style: { 'background-color': '#16a34a' } },
-              { selector: 'node[type = "Owner"]',      style: { 'background-color': '#f59e0b' } },
-              { selector: 'node[type = "RRR"]',        style: { 'background-color': '#dc2626' } },
-              { selector: 'node[type = "Zoning"]',     style: { 'background-color': '#9333ea' } },
-              { selector: 'node[type = "SurveyPlan"]', style: { 'background-color': '#0d9488' } },
-              { selector: 'node[type = "Assessment"]', style: { 'background-color': '#6b7280' } },
+              // Parcel: rectangle + color
+              {
+                selector: '[type = "Parcel"]',
+                style: {
+                  'shape': 'round-rectangle',
+                  'background-color': '#2563eb',
+                  'width': 'label',
+                  'height': 'label',
+                  'font-size': 12,
+                  'font-weight': 'bold',
+                  'color': 'white',
+                  'padding': '8px'
+                }
+              },
+              // Per-type colors (circles)
+              { selector: '[type = "Title"]',      style: { 'background-color': '#16a34a' } },
+              { selector: '[type = "Owner"]',      style: { 'background-color': '#f59e0b' } },
+              { selector: '[type = "RRR"]',        style: { 'background-color': '#dc2626' } },
+              { selector: '[type = "Zoning"]',     style: { 'background-color': '#9333ea' } },
+              { selector: '[type = "SurveyPlan"]', style: { 'background-color': '#0d9488' } },
+              { selector: '[type = "Assessment"]', style: { 'background-color': '#6b7280' } },
+
               {
                 selector: 'edge',
                 style: {
