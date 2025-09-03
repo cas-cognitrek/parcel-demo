@@ -101,7 +101,7 @@
       try { const u = new URL(url); return /\/api(\/|$)/.test(u.pathname); } catch { return /\/api(\/|$)/.test(url); }
     }
     const API_PREFIX = hasApiPrefix(RAW_API_BASE) ? "" : "/api/v1";
-    function apiUrl(){ // join RAW_API_BASE + API_PREFIX + arguments
+    function apiUrl(){
       const parts = [RAW_API_BASE, API_PREFIX, ...Array.from(arguments)];
       const first = parts.shift();
       return String(first).replace(/\/+$/,'') + '/' + parts.map(p => cleanPart(p)).filter(Boolean).join('/');
@@ -167,17 +167,56 @@
       }
     }
 
-    // ---- Graph ----
+    // ---- Graph: color + type inference ----
     function renderGraph(id){
       fetchJSON(apiUrl('graph','parcel', encodeURIComponent(id)), 'graph')
         .then(g => {
           const edgesRaw = g.edges || g.links || [];
-          // Ensure each node carries a usable 'type' attribute in data
-          const nodes = (g.nodes || []).map(n => ({
-            data: { id: String(n.id), label: String(n.label || n.id), type: String(n.type || '') }
-          }));
+
+          // Palette and kind inference
+          const COLORS = {
+            Parcel: '#2563eb',
+            Title: '#16a34a',
+            Owner: '#f59e0b',
+            RRR: '#dc2626',
+            Zoning: '#9333ea',
+            SurveyPlan: '#0d9488',
+            Assessment: '#6b7280',
+            Unknown: '#9ca3af'
+          };
+          const guessKind = (n) => {
+            const t = n.type || n.Type || n.kind || n.category || '';
+            if (t) return String(t);
+            const lbl = String(n.label || n.id || '').toLowerCase();
+            if (lbl.includes('parcel')) return 'Parcel';
+            if (lbl.includes('title')) return 'Title';
+            if (lbl.includes('owner')) return 'Owner';
+            if (lbl.includes('zoning')) return 'Zoning';
+            if (lbl.includes('plan')) return 'SurveyPlan';
+            if (lbl.includes('assessment') || lbl.match(/\b\d{5,}\b/)) return 'Assessment';
+            if (lbl.includes('rrr') || lbl.includes('right of way') || lbl.includes('right')) return 'RRR';
+            return 'Unknown';
+          };
+
+          const nodes = (g.nodes || []).map(n => {
+            const kind = guessKind(n);
+            return {
+              data: {
+                id: String(n.id),
+                label: String(n.label || n.id),
+                type: kind,
+                color: COLORS[kind] || COLORS.Unknown
+              }
+            };
+          });
+
           const edges = edgesRaw.map(e => ({
-            data: { id: `${e.source}-${e.type||e.label||'REL'}-${e.target}`, source: String(e.source), target: String(e.target), label: e.type||e.label }
+            data: {
+              id: `${e.source}-${e.type||e.label||'REL'}-${e.target}`,
+              source: String(e.source),
+              target: String(e.target),
+              label: e.type || e.label
+            }
           }));
 
           if (!nodes.length) {
@@ -189,22 +228,15 @@
           cytoscape({
             container: document.getElementById('graph'),
             elements: { nodes, edges },
-            layout: {
-              name: 'cose',
-              animate: false,
-              padding: 30,
-              nodeRepulsion: 9000,
-              idealEdgeLength: 150
-            },
+            layout: { name: 'cose', animate: false, padding: 30, nodeRepulsion: 9000, idealEdgeLength: 150 },
             style: [
-              // Default: CIRCLES with small font
               {
                 selector: 'node',
                 style: {
                   'shape': 'ellipse',
                   'width': 34,
                   'height': 34,
-                  'background-color': '#9ca3af',   /* default grey */
+                  'background-color': 'data(color)',   /* <- color from data */
                   'label': 'data(label)',
                   'font-size': 10,
                   'text-wrap': 'wrap',
@@ -215,12 +247,11 @@
                   'padding': '4px'
                 }
               },
-              // Parcel: rectangle + color
+              /* Parcel override: rectangle + larger text; color still from data(color) */
               {
                 selector: '[type = "Parcel"]',
                 style: {
                   'shape': 'round-rectangle',
-                  'background-color': '#2563eb',
                   'width': 'label',
                   'height': 'label',
                   'font-size': 12,
@@ -229,14 +260,6 @@
                   'padding': '8px'
                 }
               },
-              // Per-type colors (circles)
-              { selector: '[type = "Title"]',      style: { 'background-color': '#16a34a' } },
-              { selector: '[type = "Owner"]',      style: { 'background-color': '#f59e0b' } },
-              { selector: '[type = "RRR"]',        style: { 'background-color': '#dc2626' } },
-              { selector: '[type = "Zoning"]',     style: { 'background-color': '#9333ea' } },
-              { selector: '[type = "SurveyPlan"]', style: { 'background-color': '#0d9488' } },
-              { selector: '[type = "Assessment"]', style: { 'background-color': '#6b7280' } },
-
               {
                 selector: 'edge',
                 style: {
@@ -252,6 +275,7 @@
               }
             ]
           });
+
           setPill(pillLast, 'ok', 'Last: graph ✓');
           msg('');
         })
