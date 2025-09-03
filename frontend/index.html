@@ -5,11 +5,12 @@
   <title>Parcel Demo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <!-- Panzoom CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/cytoscape-panzoom@2.5.3/cytoscape.js-panzoom.css"/>
   <style>
     :root { --border:#e5e7eb; --muted:#6b7280; --ok:#16a34a; --bad:#dc2626; --warn:#d97706; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
     header { padding:10px 14px; border-bottom:1px solid var(--border); display:flex; gap:10px; align-items:center; }
-    /* Make the graph much taller: last row ~45vh */
     #app { display:grid; grid-template-columns: 1fr 360px; grid-template-rows: auto auto 1fr 45vh; height: calc(100vh - 50px); }
     #toolbar { grid-column: 1 / span 2; display:flex; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--border); }
     #statusbar { grid-column: 1 / span 2; padding:6px 14px; font-size:13px; border-bottom:1px solid var(--border); display:flex; gap:14px; align-items:center; }
@@ -21,7 +22,7 @@
     #map { grid-column: 1; grid-row: 3; }
     #panel { grid-column: 2; grid-row: 3 / span 2; border-left:1px solid var(--border); overflow:auto; padding:12px; }
     #graphWrap { grid-column: 1; grid-row: 4; border-top:1px solid var(--border); display:flex; gap:10px; align-items:stretch; padding:8px 10px; }
-    #graph { flex:1 1 auto; min-height: 100%; }
+    #graph { flex:1 1 auto; min-height: 100%; position: relative; }
     #legend { width: 220px; border-left:1px dashed var(--border); padding-left:10px; font-size:12px; color:#111827; }
     #legend h4 { margin:4px 0 8px; font-size:12px; color:#374151; }
     #legend .item { display:flex; align-items:center; gap:8px; margin:6px 0; }
@@ -88,10 +89,11 @@
   <!-- Libraries -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.umd.js"></script>
+  <!-- Panzoom extension -->
+  <script src="https://unpkg.com/cytoscape-panzoom@2.5.3/cytoscape-panzoom.js"></script>
 
   <!-- App script -->
   <script>
-    // ---------- Safe config & flexible API paths ----------
     const RAW_API_BASE = (window.API_BASE && String(window.API_BASE)) || "https://parcel-demo-backend.onrender.com";
     const GEOJSON_URL  = (window.GEOJSON_URL && String(window.GEOJSON_URL)) || "synthetic_parcels.geojson";
     const USING_API    = (typeof window.USING_API === "boolean") ? window.USING_API : true;
@@ -101,275 +103,83 @@
       try { const u = new URL(url); return /\/api(\/|$)/.test(u.pathname); } catch { return /\/api(\/|$)/.test(url); }
     }
     const API_PREFIX = hasApiPrefix(RAW_API_BASE) ? "" : "/api/v1";
-    function apiUrl(){
-      const parts = [RAW_API_BASE, API_PREFIX, ...Array.from(arguments)];
-      const first = parts.shift();
-      return String(first).replace(/\/+$/,'') + '/' + parts.map(p => cleanPart(p)).filter(Boolean).join('/');
-    }
+    function apiUrl(){ const parts = [RAW_API_BASE, API_PREFIX, ...Array.from(arguments)]; const first = parts.shift(); return String(first).replace(/\/+$/,'') + '/' + parts.map(p => cleanPart(p)).filter(Boolean).join('/'); }
 
-    // ---------- Status helpers ----------
     const pillBackend = document.getElementById('pill-backend');
     const pillGeojson = document.getElementById('pill-geojson');
     const pillLast    = document.getElementById('pill-last');
     const statusMsg   = document.getElementById('status-msg');
-    function setPill(el, state, text){
-      el.classList.remove('ok','bad','warn');
-      el.classList.add(state);
-      el.textContent = text;
-    }
+    function setPill(el, state, text){ el.classList.remove('ok','bad','warn'); el.classList.add(state); el.textContent = text; }
     function msg(s){ statusMsg.textContent = s || ''; }
 
-    // ---------- Map ----------
     const map = L.map('map').setView([49.25, -123.12], 11);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OSM' }).addTo(map);
 
     const parcelSelect = document.getElementById("parcelSelect");
 
-    function setText(id, text){
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.textContent = (text && String(text).trim()) || '—';
-    }
+    function setText(id, text){ const el = document.getElementById(id); if (el) el.textContent = (text && String(text).trim()) || '—'; }
     function firstOrNull(arr){ return Array.isArray(arr) && arr.length ? arr[0] : null; }
-    function prop(o, k){
-      if (!o) return null;
-      const nested = o.properties && (o.properties[k] ?? o.properties[k?.toLowerCase?.()]);
-      return (nested !== undefined) ? nested : o[k];
-    }
-    function pickAny(o, keys){
-      for (const k of keys){
-        const v = prop(o, k);
-        if (v !== undefined && v !== null && v !== '') return v;
-      }
-      return null;
-    }
+    function prop(o, k){ if (!o) return null; const nested = o.properties && (o.properties[k] ?? o.properties[k?.toLowerCase?.()]); return (nested !== undefined) ? nested : o[k]; }
+    function pickAny(o, keys){ for (const k of keys){ const v = prop(o, k); if (v !== undefined && v !== null && v !== '') return v; } return null; }
 
-    // ---------- Robust fetch ----------
-    async function fetchJSON(url, name){
-      pillLast.textContent = `Last: ${name}`;
-      const r = await fetch(url, { headers: { 'accept':'application/json' }});
-      if (!r.ok) {
-        const t = await r.text().catch(()=> '');
-        throw new Error(`${name}: ${r.status} ${r.statusText} ${t.slice(0,200)}`);
-      }
-      return r.json();
-    }
+    async function fetchJSON(url, name){ pillLast.textContent = `Last: ${name}`; const r = await fetch(url, { headers: { 'accept':'application/json' }}); if (!r.ok) { const t = await r.text().catch(()=> ''); throw new Error(`${name}: ${r.status} ${r.statusText} ${t.slice(0,200)}`);} return r.json(); }
 
-    async function checkHealth(){
-      try {
-        const j = await fetchJSON(apiUrl('health'), 'health');
-        setPill(pillBackend, j && j.ok ? 'ok' : 'warn', `Backend: ${j && j.ok ? 'OK' : 'Unknown'}`);
-        msg('');
-      } catch (e){
-        console.error(e);
-        setPill(pillBackend, 'bad', 'Backend: ERROR');
-        msg(String(e.message || e));
-      }
-    }
+    async function checkHealth(){ try { const j = await fetchJSON(apiUrl('health'), 'health'); setPill(pillBackend, j && j.ok ? 'ok' : 'warn', `Backend: ${j && j.ok ? 'OK' : 'Unknown'}`); msg(''); } catch (e){ console.error(e); setPill(pillBackend, 'bad', 'Backend: ERROR'); msg(String(e.message || e)); } }
 
-    // ---- Graph: color + type inference ----
     function renderGraph(id){
       fetchJSON(apiUrl('graph','parcel', encodeURIComponent(id)), 'graph')
         .then(g => {
-          const edgesRaw = g.edges || g.links || [];
+          const edgesRaw = g.edges || [];
+          const COLORS = { Parcel:'#2563eb', Title:'#16a34a', Owner:'#f59e0b', RRR:'#dc2626', Zoning:'#9333ea', SurveyPlan:'#0d9488', Assessment:'#6b7280', Unknown:'#9ca3af' };
+          const guessKind = (n) => { const t = n.type||n.Type||n.kind||n.category||''; if (t) return String(t); const lbl = String(n.label||n.id||'').toLowerCase(); if (lbl.includes('parcel')) return 'Parcel'; if (lbl.includes('title')) return 'Title'; if (lbl.includes('owner')) return 'Owner'; if (lbl.includes('zoning')) return 'Zoning'; if (lbl.includes('plan')) return 'SurveyPlan'; if (lbl.includes('assessment')||lbl.match(/\b\d{5,}\b/)) return 'Assessment'; if (lbl.includes('rrr')||lbl.includes('right')) return 'RRR'; return 'Unknown'; };
+          const nodes = (g.nodes||[]).map(n => { const kind=guessKind(n); return { data:{ id:String(n.id), label:String(n.label||n.id), type:kind, color:COLORS[kind]||COLORS.Unknown } }; });
+          const edges = edgesRaw.map(e => ({ data:{ id:`${e.source}-${e.type||e.label||'REL'}-${e.target}`, source:String(e.source), target:String(e.target), label:e.type||e.label } }));
+          if (!nodes.length){ setPill(pillLast,'warn','Last: graph (0 nodes)'); msg('Graph returned no nodes.'); return; }
 
-          // Palette and kind inference
-          const COLORS = {
-            Parcel: '#2563eb',
-            Title: '#16a34a',
-            Owner: '#f59e0b',
-            RRR: '#dc2626',
-            Zoning: '#9333ea',
-            SurveyPlan: '#0d9488',
-            Assessment: '#6b7280',
-            Unknown: '#9ca3af'
-          };
-          const guessKind = (n) => {
-            const t = n.type || n.Type || n.kind || n.category || '';
-            if (t) return String(t);
-            const lbl = String(n.label || n.id || '').toLowerCase();
-            if (lbl.includes('parcel')) return 'Parcel';
-            if (lbl.includes('title')) return 'Title';
-            if (lbl.includes('owner')) return 'Owner';
-            if (lbl.includes('zoning')) return 'Zoning';
-            if (lbl.includes('plan')) return 'SurveyPlan';
-            if (lbl.includes('assessment') || lbl.match(/\b\d{5,}\b/)) return 'Assessment';
-            if (lbl.includes('rrr') || lbl.includes('right of way') || lbl.includes('right')) return 'RRR';
-            return 'Unknown';
-          };
-
-          const nodes = (g.nodes || []).map(n => {
-            const kind = guessKind(n);
-            return {
-              data: {
-                id: String(n.id),
-                label: String(n.label || n.id),
-                type: kind,
-                color: COLORS[kind] || COLORS.Unknown
-              }
-            };
-          });
-
-          const edges = edgesRaw.map(e => ({
-            data: {
-              id: `${e.source}-${e.type||e.label||'REL'}-${e.target}`,
-              source: String(e.source),
-              target: String(e.target),
-              label: e.type || e.label
-            }
-          }));
-
-          if (!nodes.length) {
-            setPill(pillLast, 'warn', 'Last: graph (0 nodes)');
-            msg('Graph returned no nodes.');
-            return;
-          }
-
-          cytoscape({
+          const cy = cytoscape({
             container: document.getElementById('graph'),
             elements: { nodes, edges },
-            layout: { name: 'cose', animate: false, padding: 30, nodeRepulsion: 9000, idealEdgeLength: 150 },
+            layout: { name:'cose', animate:false, padding:30, nodeRepulsion:9000, idealEdgeLength:150 },
             style: [
-              {
-                selector: 'node',
-                style: {
-                  'shape': 'ellipse',
-                  'width': 34,
-                  'height': 34,
-                  'background-color': 'data(color)',   /* <- color from data */
-                  'label': 'data(label)',
-                  'font-size': 10,
-                  'text-wrap': 'wrap',
-                  'text-max-width': 110,
-                  'text-valign': 'center',
-                  'text-halign': 'center',
-                  'color': '#111827',
-                  'padding': '4px'
-                }
-              },
-              /* Parcel override: rectangle + larger text; color still from data(color) */
-              {
-                selector: '[type = "Parcel"]',
-                style: {
-                  'shape': 'round-rectangle',
-                  'width': 'label',
-                  'height': 'label',
-                  'font-size': 12,
-                  'font-weight': 'bold',
-                  'color': 'white',
-                  'padding': '8px'
-                }
-              },
-              {
-                selector: 'edge',
-                style: {
-                  'label': 'data(label)',
-                  'font-size': 9,
-                  'color': '#374151',
-                  'curve-style': 'bezier',
-                  'target-arrow-shape': 'triangle',
-                  'target-arrow-color': '#9ca3af',
-                  'width': 1,
-                  'line-color': '#9ca3af'
-                }
-              }
+              { selector:'node', style:{ 'shape':'ellipse','width':34,'height':34,'background-color':'data(color)','label':'data(label)','font-size':10,'text-wrap':'wrap','text-max-width':110,'text-valign':'center','text-halign':'center','color':'#111827','padding':'4px'} },
+              { selector:'[type = "Parcel"]', style:{ 'shape':'round-rectangle','width':'label','height':'label','font-size':12,'font-weight':'bold','color':'white','padding':'8px'} },
+              { selector:'edge', style:{ 'label':'data(label)','font-size':9,'color':'#374151','curve-style':'bezier','target-arrow-shape':'triangle','target-arrow-color':'#9ca3af','width':1,'line-color':'#9ca3af'} }
             ]
           });
 
-          setPill(pillLast, 'ok', 'Last: graph ✓');
-          msg('');
+          // Attach panzoom controls
+          cy.panzoom({ zoomFactor:0.05, minZoom:0.1, maxZoom:3, fitPadding:20 });
+
+          setPill(pillLast,'ok','Last: graph ✓'); msg('');
         })
-        .catch(err => {
-          console.error('graph', err);
-          setPill(pillLast, 'bad', 'Last: graph ✗');
-          msg(err.message);
-        });
+        .catch(err => { console.error('graph',err); setPill(pillLast,'bad','Last: graph ✗'); msg(err.message); });
     }
 
     function loadDetails(id){
       if (!USING_API){ setText('p-id', id); return; }
       fetchJSON(apiUrl('parcels', encodeURIComponent(id)), 'details')
         .then(d => {
-          const parcelNode = d.parcel || null;
-
-          const pid = pickAny(parcelNode, ['parcelId','id']) || d.parcelId || id;
-          setText('p-id', pid);
-
-          const legal = pickAny(parcelNode, ['legalDescription','legal','legaldescription']);
-          setText('p-legal', legal);
-
-          const titleNode = firstOrNull(d.titles);
-          const titleTxt = pickAny(titleNode, ['number','id','name','titleId']);
-          setText('p-title', titleTxt);
-
-          const owners = (d.owners || []).map(o => pickAny(o, ['name','ownerName'])).filter(Boolean).join(', ');
-          setText('p-owners', owners);
-
-          const rrrs = (d.rrrs || []).map(r => pickAny(r, ['type','rrrType','name'])).filter(Boolean).join(', ');
-          setText('p-rrr', rrrs);
-
-          const zoningList = Array.isArray(d.zonings) ? d.zonings : (d.zoning ? [d.zoning] : []);
-          const zonings = zoningList.map(z => pickAny(z, ['code','name','zoningCode','zoning'])).filter(Boolean).join(', ');
-          setText('p-zoning', zonings);
-
-          const planNode = firstOrNull(d.plans);
-          const planTxt = pickAny(planNode, ['number','name','id','planId']);
-          setText('p-plan', planTxt);
-
-          const assessNode = firstOrNull(d.assessments);
-          const assessTxt = pickAny(assessNode, ['value','amount','year','id']);
-          setText('p-assess', assessTxt);
-
-          setPill(pillLast, 'ok', 'Last: details ✓');
-          msg('');
+          const parcelNode = d.parcel||null;
+          const pid = pickAny(parcelNode,['parcelId','id']) || d.parcelId || id; setText('p-id',pid);
+          setText('p-legal', pickAny(parcelNode,['legalDescription','legal']));
+          setText('p-title', pickAny(firstOrNull(d.titles),['number','id','name']));
+          setText('p-owners',(d.owners||[]).map(o=>pickAny(o,['name'])).filter(Boolean).join(', '));
+          setText('p-rrr',(d.rrrs||[]).map(r=>pickAny(r,['type'])).filter(Boolean).join(', '));
+          setText('p-zoning',(d.zonings||[]).map(z=>pickAny(z,['code','name'])).filter(Boolean).join(', '));
+          setText('p-plan', pickAny(firstOrNull(d.plans),['number','name','id']));
+          setText('p-assess', pickAny(firstOrNull(d.assessments),['value','amount','year','id']));
+          setPill(pillLast,'ok','Last: details ✓'); msg('');
           renderGraph(id);
         })
-        .catch(err => {
-          console.error('details', err);
-          setPill(pillLast, 'bad', 'Last: details ✗');
-          msg(err.message);
-          setText('p-id', id);
-        });
+        .catch(err=>{ console.error('details',err); setPill(pillLast,'bad','Last: details ✗'); msg(err.message); setText('p-id',id); });
     }
 
-    // Load GeoJSON and populate dropdown
-    fetch(GEOJSON_URL)
-      .then(r => { if(!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json(); })
-      .then(gj => {
-        const geoLayer = L.geoJSON(gj, {
-          style: { color:'#2563eb', weight:1, fillOpacity:0.2 },
-          onEachFeature: (f, layer) => {
-            const p = f.properties || {};
-            const pid = p.parcelid || p.parcelId || p.id || p.PID;
-            if (pid) layer.on('click', () => { parcelSelect.value = pid; loadDetails(pid); });
-          }
-        }).addTo(map);
-        try { map.fitBounds(geoLayer.getBounds()); } catch {}
+    fetch(GEOJSON_URL).then(r=>{if(!r.ok) throw new Error(`${r.status} ${r.statusText}`); return r.json();})
+      .then(gj=>{ const geoLayer=L.geoJSON(gj,{style:{color:'#2563eb',weight:1,fillOpacity:0.2},onEachFeature:(f,layer)=>{const p=f.properties||{};const pid=p.parcelid||p.parcelId||p.id||p.PID;if(pid)layer.on('click',()=>{parcelSelect.value=pid;loadDetails(pid);});}}).addTo(map); try{map.fitBounds(geoLayer.getBounds());}catch{} const options=(gj.features||[]).map(feat=>{const p=(feat&&feat.properties)||{};return p.parcelid||p.parcelId||p.id||p.PID;}).filter(Boolean).sort((a,b)=>String(a).localeCompare(String(b))); parcelSelect.innerHTML=`<option value="">Select a parcel…</option>`+options.map(o=>`<option value="${o}">${o}</option>`).join(""); setPill(pillGeojson,'ok','GeoJSON: loaded'); })
+      .catch(err=>{ console.error('geojson',err); setPill(pillGeojson,'bad','GeoJSON: ERROR'); msg(err.message); parcelSelect.innerHTML=`<option value="">GeoJSON failed to load</option>`; });
 
-        const options = (gj.features || [])
-          .map(feat => {
-            const p = (feat && feat.properties) || {};
-            return p.parcelid || p.parcelId || p.id || p.PID;
-          })
-          .filter(Boolean)
-          .sort((a,b)=>String(a).localeCompare(String(b)));
+    parcelSelect.addEventListener("change", e => { const id=e.target.value; if(id) loadDetails(id); });
 
-        parcelSelect.innerHTML = `<option value="">Select a parcel…</option>` + options.map(o=>`<option value="${o}">${o}</option>`).join("");
-        setPill(pillGeojson, 'ok', 'GeoJSON: loaded');
-      })
-      .catch(err => {
-        console.error('geojson', err);
-        setPill(pillGeojson, 'bad', 'GeoJSON: ERROR');
-        msg(err.message);
-        parcelSelect.innerHTML = `<option value="">GeoJSON failed to load</option>`;
-      });
-
-    parcelSelect.addEventListener("change", e => {
-      const id = e.target.value;
-      if (id) loadDetails(id);
-    });
-
-    // Kick off health check on load
     checkHealth();
   </script>
 </body>
